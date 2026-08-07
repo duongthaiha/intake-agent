@@ -78,17 +78,11 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       }
       scaleAndConcurrency: {
         maximumInstanceCount: 100
-        instanceMemoryMB: 2048
-        // Keep 1 always-ready instance for each SB trigger function group so
-        // the listener is persistently active.  Without this FC1 only starts
-        // SB-group instances when the external scale controller detects backlog
-        // via queue-depth metrics, which requires Data Owner and can be delayed.
-        // FC1 alwaysReady name format: "function:<functionName>"
-        alwaysReady: [
-          { name: 'function:domain_event_dispatcher', instanceCount: 1 }
-          { name: 'function:document_worker', instanceCount: 1 }
-          { name: 'function:notification_worker', instanceCount: 1 }
-        ]
+        // 512 MB is the cost-optimised POC setting; 2048 MB was only needed
+        // when alwaysReady was required to work around missing Data Owner.
+        // Now that Data Owner is assigned, the FC1 scale controller reads queue
+        // depth accurately and starts SB-group instances on demand.
+        instanceMemoryMB: 512
       }
       runtime: {
         name: 'python'

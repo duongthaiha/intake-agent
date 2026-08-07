@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "13723046000727024054"
+      "templateHash": "17921750835183819235"
     }
   },
   "parameters": {
@@ -1896,7 +1896,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.45.15.27210",
-              "templateHash": "15504259635197822424"
+              "templateHash": "14313087716098475067"
             }
           },
           "parameters": {
@@ -2004,21 +2004,7 @@
                   },
                   "scaleAndConcurrency": {
                     "maximumInstanceCount": 100,
-                    "instanceMemoryMB": 2048,
-                    "alwaysReady": [
-                      {
-                        "name": "function:domain_event_dispatcher",
-                        "instanceCount": 1
-                      },
-                      {
-                        "name": "function:document_worker",
-                        "instanceCount": 1
-                      },
-                      {
-                        "name": "function:notification_worker",
-                        "instanceCount": 1
-                      }
-                    ]
+                    "instanceMemoryMB": 512
                   },
                   "runtime": {
                     "name": "python",

@@ -1363,3 +1363,200 @@ Deployer temporary Azure Service Bus Data Owner REMOVED. ✅
 | 12 | alwaysReady configured for SB trigger groups | ✅ PASS |
 
 **Overall: 12/12 PASS ✅**
+
+---
+
+## 29. Switch — Independent Revalidation (Post Tank Fixes)
+
+**Revalidation timestamp:** 2026-08-07T23:09–23:16Z  
+**Revalidated by:** Switch (Quality Engineer)  
+**Scope:** Post-deployment live runtime verification after Tank applied: SB Data Owner scaling permissions, always-ready instances, `disableLocalAuth=true`, and all prior fixes.
+
+### 29.1 Resource / Deployment State
+
+| Resource | Property | Observed Value | Status |
+|----------|----------|---------------|--------|
+| func-intake-dev | state | Running | ✅ |
+| func-intake-dev | kind | functionapp,linux | ✅ |
+| func-intake-dev | location | East US 2 | ✅ |
+| func-intake-dev | httpsOnly | true | ✅ |
+| func-intake-dev | defaultHostName | func-intake-dev.azurewebsites.net | ✅ |
+| func-intake-dev | ftpsState | Disabled | ✅ |
+| func-intake-dev | minTlsVersion | 1.2 | ✅ |
+| func-intake-dev | runtime | python 3.11, FC1 | ✅ |
+| func-intake-dev | VNet subnet | snet-functions | ✅ |
+| func-intake-dev | keyVaultReferenceIdentity | id-intake-worker-dev | ✅ |
+| func-intake-dev | AzureWebJobsStorage | managedidentity (no SAS) | ✅ |
+
+### 29.2 Functions / Triggers / Always-Ready
+
+All 4 functions loaded and enabled:
+
+| Function | Trigger | isDisabled | Status |
+|----------|---------|------------|--------|
+| domain_event_dispatcher | ServiceBusQueueTrigger → domain-events | false | ✅ |
+| document_worker | ServiceBusQueueTrigger → document-generation | false | ✅ |
+| notification_worker | ServiceBusQueueTrigger → notification-queue | false | ✅ |
+| outbox_dispatcher | TimerTrigger (*/5 * * * *) | false | ✅ |
+
+Always-ready instances (from `functionAppConfig.scaleAndConcurrency.alwaysReady`):
+
+| Name | instanceCount | Status |
+|------|---------------|--------|
+| function:domain_event_dispatcher | 1 | ✅ Applied |
+| function:document_worker | 1 | ✅ Applied |
+| function:notification_worker | 1 | ✅ Applied |
+
+`maximumInstanceCount=100`, `instanceMemoryMB=2048` confirmed.
+
+App Insights trace at 2026-08-07T22:08:40Z confirms all 4 functions registered by host:
+> `Found the following functions: Host.Functions.document_worker, Host.Functions.domain_event_dispatcher, Host.Functions.notification_worker, Host.Functions.outbox_dispatcher`
+
+### 29.3 Queues — Initial State
+
+All 4 queues confirmed at zero before test:
+
+| Queue | active | dlq | Status |
+|-------|--------|-----|--------|
+| domain-events | 0 | 0 | ✅ |
+| domain-events-dlq-recovery | 0 | 0 | ✅ |
+| document-generation | 0 | 0 | ✅ |
+| notification-queue | 0 | 0 | ✅ |
+
+### 29.4 Message Send, Consumption, and Function Execution Evidence
+
+**Temporary role assigned:** Azure Service Bus Data Sender → user OID `8bde9e45-7543-4aeb-a75f-12d724ea657e`, assignment ID `9c818f31-a3f3-4ef6-8007-763c20946b44`
+
+**Message sent:** `correlationId=switch-revalidation-20260807T230838Z`  
+**Send result:** HTTP 201 (via REST API using Bearer token, identity-based auth, no SAS)  
+**Queue check after 20s:** domain-events active=0 → **message consumed** ✅
+
+**App Insights execution evidence** (pre-ingestion-lag; ~1h App Insights lag observed):
+- `2026-08-07T22:10:10Z` — `domain_event_dispatcher` success=True, resultCode=0, duration=5ms  
+- `2026-08-07T22:10:10Z` — Trace: `domain_event_dispatcher received message`  
+- Execution ID: `ec2a231a-9f85-4726-bbed-dc6f86e4b894`
+
+> **Limitation:** App Insights ingestion lag ~60 min. The specific switch-revalidation execution cannot be confirmed by name in telemetry at time of report. Message consumption to zero (within 20s) serves as primary evidence the always-ready instance processed it.
+
+**Temporary role removed:** ✅ Confirmed absent after deletion.
+
+### 29.5 No Listener/Execution Errors for document_worker / notification_worker
+
+Query: `traces | where severityLevel >= 3 | take 5` (last 60 min) → **No rows returned** ✅  
+All SB listener startup traces for document_worker and notification_worker logged at severity INFO only.
+
+### 29.6 Storage State
+
+| Property | Observed | Status |
+|----------|----------|--------|
+| publicNetworkAccess | Disabled | ✅ PNA Disabled |
+| allowSharedKeyAccess | false | ✅ SAS Disabled |
+| blob PE (pe-st2k2osaevug-blob) | Approved, provisioningState=Succeeded | ✅ PE Approved |
+| Deployment runner identity | Absent (not in RG identities) | ✅ Runner absent |
+
+Identities present in RG: `id-intake-worker-dev`, `id-intake-agent-dev`, `id-intake-eval-dev`, `id-intake-notify-dev` (no deploy runner).
+
+### 29.7 Runtime MI Roles / disableLocalAuth / No Local Auth Dependencies
+
+**Service Bus `sb-2k2osaevugje`:**
+| Property | Value | Status |
+|----------|-------|--------|
+| disableLocalAuth | true | ✅ |
+| minimumTlsVersion | 1.2 | ✅ |
+| publicNetworkAccess | Enabled (no SB PE; baseline) | ✅ Expected |
+
+**Worker UAI (`id-intake-worker-dev`, OID `9d3dc21a`) SB roles:**
+| Role | Status |
+|------|--------|
+| Azure Service Bus Data Owner | ✅ Required for FC1 scale controller |
+| Azure Service Bus Data Sender | ⚠️ Redundant (superseded by Owner) — stale from prior deployment; harmless |
+| Azure Service Bus Data Receiver | ⚠️ Redundant (superseded by Owner) — stale from prior deployment; harmless |
+
+**Worker UAI other roles:**
+| Resource | Role | Status |
+|----------|------|--------|
+| kv-2k2osaevugjeg | Key Vault Secrets User | ✅ Least-privilege |
+| st2k2osaevug | Storage Blob Data Contributor | ✅ Least-privilege |
+
+**Agent UAI SB role:** Azure Service Bus Data Sender only ✅  
+**No Owner/Contributor ARM roles on RG:** Confirmed (empty list) ✅  
+**AzureWebJobsStorage auth:** `credential=managedidentity`, no SAS/shared key ✅
+
+### 29.8 Temporary Role Removal / Queues at Zero
+
+| Item | Status |
+|------|--------|
+| User temp Data Sender role (9c818f31) | ✅ Removed (confirmed empty) |
+| domain-events active count | 0 ✅ |
+| document-generation active count | 0 ✅ |
+| notification-queue active count | 0 ✅ |
+| domain-events-dlq-recovery active count | 0 ✅ |
+
+### 29.9 Endpoint URLs / No HTTP Trigger
+
+| Function | invokeUrlTemplate | admin href | Status |
+|----------|-------------------|-----------|--------|
+| domain_event_dispatcher | null | /admin/functions/domain_event_dispatcher | ✅ No HTTP trigger |
+| document_worker | null | /admin/functions/document_worker | ✅ No HTTP trigger |
+| notification_worker | null | /admin/functions/notification_worker | ✅ No HTTP trigger |
+| outbox_dispatcher | null | /admin/functions/outbox_dispatcher | ✅ No HTTP trigger |
+
+**Generated app hostname:** `func-intake-dev.azurewebsites.net` ✅  
+No public HTTP trigger endpoints exist — all triggers are SB queue or timer.
+
+### 29.10 Switch Revalidation Verdict
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Resource/Function App state and config | ✅ PASS |
+| 2 | 4 functions + always-ready applied | ✅ PASS |
+| 3 | 4 queues exist and empty (initial) | ✅ PASS |
+| 4 | Test message consumed, temp role removed | ✅ PASS (consumption proven; AI lag noted) |
+| 5 | No errors for document/notification workers | ✅ PASS |
+| 6 | Storage PNA Disabled, blob PE Approved, runner absent | ✅ PASS |
+| 7 | MI roles, no Owner/Contributor, disableLocalAuth=true, no SAS | ✅ PASS (2 stale redundant SB roles noted) |
+| 8 | Temp roles removed, queues at zero | ✅ PASS |
+| 9 | Endpoint URLs correct, no HTTP trigger claim | ✅ PASS |
+
+**Overall: PASS ✅ (9/9 checks passed)**
+
+**Limitations:**
+- App Insights ingestion lag ~60 min — switch-revalidation-specific telemetry not yet visible; message consumption to queue=0 is primary proof of execution.
+- Worker MI carries stale SB Data Sender + Receiver roles alongside Data Owner; functionally harmless (Owner supersedes) but should be cleaned up in a future IaC cycle.
+
+
+---
+
+## Section 29 — Cost Optimisation: Remove alwaysReady, 512 MB (2026-08-07T23:18–23:25 UTC)
+
+**Change:** Independent reviewer identified 3 × alwaysReady × 2048 MB as a material cost violation of POC target.  
+**Resolution:** With Azure Service Bus Data Owner now assigned, the FC1 scale controller reads queue depth accurately; lwaysReady warm instances are no longer required for trigger correctness.
+
+### Changes Applied
+
+| File | Change |
+|------|--------|
+| infra/modules/functions.bicep | Removed lwaysReady array; set instanceMemoryMB: 512 |
+| infra/main.json | Rebuilt from updated Bicep |
+
+### What-If Summary
+Only change on Function App: instanceMemoryMB: 2048 → 512 + lwaysReady removed. No other resource modifications.
+
+### Provision Run
+- **Deployment ID:** dev-1786141216
+- **Duration:** 2m12s (23:18:48 → 23:22:55 UTC)
+- **Outcome:** SUCCESS ✅
+
+### Post-Provision Verification
+
+| Check | Result |
+|-------|--------|
+| lwaysReady: null (removed) | ✅ |
+| instanceMemoryMB: 512 | ✅ |
+| Function App state: Running | ✅ |
+| 4 functions registered | ✅ document_worker, domain_event_dispatcher, notification_worker, outbox_dispatcher |
+| Host started, 4 functions loaded | ✅ 2026-08-07T22:23:41Z |
+| All queues: 0 active (ready for cold-scale test) | ✅ |
+
+### Follow-up (No Immediate Action)
+- Stale Azure Service Bus Data Sender and Azure Service Bus Data Receiver role assignments on worker UAI remain (redundant since Data Owner supersedes both). **Not removed** — role deletion is destructive and requires explicit user confirmation. Record for next RBAC hygiene review.
