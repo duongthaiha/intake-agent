@@ -1,6 +1,6 @@
 # Azure Deployment Plan
 
-> **Status:** ⚠️ **Deployment Blocked (Infrastructure Deployed)** — All 13 Azure resources provisioned successfully in `rg-intake-dev` (eastus2). Workers package deployment blocked by converging Azure Policy and subscription quota constraints (see Section 25). RBAC verified: all runtime identities use least-privilege data-plane roles; no Owner/Contributor assigned. Post-deploy verification: 5/5 checks passed. Timestamp: 2026-08-07T20:45:00Z.
+> **Status:** ✅ **Deployed** — All 13 Azure resources provisioned in `rg-intake-dev` (eastus2). Workers package deployed via in-VNet Container Apps Job (Flex One Deploy to Kudu /api/publish). 4 functions loaded and running: `domain_event_dispatcher`, `document_worker`, `notification_worker`, `outbox_dispatcher`. RBAC verified: all runtime identities least-privilege data-plane only. Timestamp: 2026-08-07T21:22:00Z.
 
 Generated: 2026-08-07T16:08:46Z
 Revised: 2026-08-07T16:22:00Z (Tank — Fact Checker revision cycle)
@@ -957,3 +957,79 @@ All 13 resources provisioned in `rg-intake-dev` (eastus2). Six `azd provision` r
 | `publicNetworkAccess: Disabled` policy blocks CI/CD from GitHub Actions | 🔴 High | Set up private endpoint for storage or configure self-hosted runner |
 | `allowSharedKeyAccess: false` policy — Function App storage uses managed identity | 🟢 Low | Correctly handled in Bicep (`AzureWebJobsStorage__credential: managedidentity`) |
 | Storage Blob Data Owner (manual) removed — confirms clean RBAC | ✅ Resolved | No action needed |
+
+---
+
+## Section 26 — Recovery Deployment: Storage PE + Container Apps Job Runner (2026-08-07)
+
+### 26.1 Root Cause Summary
+
+Deployment blocked after initial provision: Azure Policy (publicNetworkAccess: Disabled + llowSharedKeyAccess: false) prevented all external blob data-plane access. Y1 plan unavailable (0 VM quota). FC1 Kudu deployment pipeline (/api/publish) blocked because it uploads to storage, which was inaccessible from the public internet.
+
+### 26.2 Recovery Actions
+
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | Added deployStoragePrivateEndpoint: true param to 
+etwork.bicep/main.bicep/main.parameters.json | PE pe-st2k2osaevug-blob provisioned; DNS A record 10.0.1.4 in privatelink.blob.core.windows.net |
+| 2 | zd provision completed | ARM dev-1786131597 succeeded; all 13 resources + PE |
+| 3 | Created Container Apps Job job-deploy-runner-tmp in cae-intake-dev (worker identity) | Manual job with azure-cli:latest image; base64-encoded source as env vars |
+| 4 | Grant temp Contributor on unc-intake-dev to worker identity 2b151595-089a-41e9-8942-ccd930dc6a5f | Needed for z functionapp restart within the VNet |
+| 5 | Deployment runner iterations (v1-v4): fixed --username→--client-id, no pip in image, FC1 requires plain POST to Kudu /api/publish (not ?type=zip) | v4 succeeded: HTTP 202, deployment ID 75aef7ef-3d66-477c-acaf-5982534ecc78 |
+| 6 | Added AzureWebJobsStorage__accountName=st2k2osaevug app setting | Resolves WebJobs host health check |
+| 7 | Deleted job-deploy-runner-tmp | Cleanup complete |
+| 8 | Removed temp Contributor role from worker identity on unc-intake-dev | Cleanup complete |
+
+### 26.3 Deployment Evidence
+
+**Deployment Trigger:**
+- Container Apps Job job-deploy-runner-tmp-wrvxxy0 (Succeeded, 2026-08-07T20:20:08Z)
+- Method: POST https://func-intake-dev.scm.azurewebsites.net/api/publish (Kudu Flex One Deploy)
+- Content-Type: pplication/zip (no ?type=zip — FC1 does not support type query param)
+- HTTP Response: 202 Accepted
+- Deployment ID: 75aef7ef-3d66-477c-acaf-5982534ecc78
+
+**Package:**
+- Source: src/intake_workers/ (function_app.py, host.json, requirements.txt, __init__.py)
+- Size: 1422 bytes
+- Build: Source-only zip (azure.functions is runtime-provided; no SDK imports in handler)
+
+**Function App Host Log (2026-08-07T20:21:11Z):**
+`
+4 functions loaded
+Worker process started and initialized.
+Found the following functions:
+  Host.Functions.document_worker
+  Host.Functions.domain_event_dispatcher
+  Host.Functions.notification_worker
+  Host.Functions.outbox_dispatcher (timer)
+ServiceBusOptions initialized
+Host started (33ms)
+`
+
+### 26.4 Post-Deployment RBAC State
+
+| Identity | Resource | Role | Scope |
+|----------|----------|------|-------|
+| id-intake-worker-dev | Storage st2k2osaevug | Storage Blob Data Contributor | Account |
+| id-intake-worker-dev | Storage st2k2osaevug | Storage Queue Data Contributor | Account |
+| id-intake-worker-dev | Key Vault kv-2k2osaevugjeg | Key Vault Secrets User | Account |
+| id-intake-worker-dev | Cosmos DB | Cosmos DB Built-in Data Contributor | Account |
+| id-intake-worker-dev | Service Bus sb-2k2osaevugje | Azure Service Bus Data Sender + Data Receiver | Namespace |
+| Temp Contributor on unc-intake-dev | Removed after deployment | — | Removed |
+
+### 26.5 Endpoint Verification
+
+- Function App: **https://func-intake-dev.azurewebsites.net** (Running; no HTTP trigger endpoints — all Service Bus + timer triggers)
+- Service Bus triggers: domain-events queue (domain_event_dispatcher), document-generation queue (document_worker), 
+otification-queue queue (notification_worker)
+- Timer trigger: outbox_dispatcher (every 5 minutes)
+
+### 26.6 Remaining Open Items
+
+| Issue | Severity | Status |
+|-------|----------|--------|
+| AI Search in astus (not astus2) | 🟡 Medium | Accepted for POC; request eastus2 quota to remediate |
+| AI Search SKU: Standard vs planned Basic | 🟡 Medium | Accepted for POC |
+| CI/CD from GitHub Actions needs in-VNet runner for future deployments | 🟡 Medium | Document approach: use Container Apps Job runner pattern established here |
+| AzureWebJobsStorage__accountName added to live app settings; Bicep updated | ✅ Resolved | infra/modules/functions.bicep updated; infra/main.json rebuilt |

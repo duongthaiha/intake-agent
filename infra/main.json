@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.45.15.27210",
-      "templateHash": "17792884114628324152"
+      "templateHash": "5618129226155335608"
     }
   },
   "parameters": {
@@ -50,6 +50,13 @@
       "defaultValue": false,
       "metadata": {
         "description": "Deploy private endpoints and configure public network access. Set true only after connectivity spike confirms Foundry → private data-plane path."
+      }
+    },
+    "deployStoragePrivateEndpoint": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy ONLY the storage blob private endpoint to enable in-VNet FC1 deployment (bypasses publicNetworkAccess:Disabled policy) without enabling all other PEs."
       }
     },
     "searchServiceLocation": {
@@ -241,6 +248,9 @@
           "deployPrivateEndpoints": {
             "value": "[parameters('deployPrivateEndpoints')]"
           },
+          "deployStoragePrivateEndpoint": {
+            "value": "[parameters('deployStoragePrivateEndpoint')]"
+          },
           "cosmosAccountName": {
             "value": "[variables('cosmosAccountName')]"
           },
@@ -264,7 +274,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.45.15.27210",
-              "templateHash": "17410675579978997737"
+              "templateHash": "15121519796861431617"
             }
           },
           "parameters": {
@@ -279,6 +289,13 @@
             },
             "deployPrivateEndpoints": {
               "type": "bool"
+            },
+            "deployStoragePrivateEndpoint": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Deploy only the storage blob private endpoint (enables in-VNet FC1 deployment without enabling all PEs)."
+              }
             },
             "cosmosAccountName": {
               "type": "string"
@@ -450,7 +467,7 @@
               ]
             },
             {
-              "condition": "[parameters('deployPrivateEndpoints')]",
+              "condition": "[or(parameters('deployPrivateEndpoints'), parameters('deployStoragePrivateEndpoint'))]",
               "type": "Microsoft.Network/privateEndpoints",
               "apiVersion": "2023-11-01",
               "name": "[format('pe-{0}-blob', parameters('storageAccountName'))]",
@@ -477,7 +494,7 @@
               ]
             },
             {
-              "condition": "[parameters('deployPrivateEndpoints')]",
+              "condition": "[or(parameters('deployPrivateEndpoints'), parameters('deployStoragePrivateEndpoint'))]",
               "type": "Microsoft.Network/privateEndpoints/privateDnsZoneGroups",
               "apiVersion": "2023-11-01",
               "name": "[format('{0}/{1}', format('pe-{0}-blob', parameters('storageAccountName')), 'default')]",
@@ -1851,7 +1868,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.45.15.27210",
-              "templateHash": "14258359358500846412"
+              "templateHash": "11005108063889732066"
             }
           },
           "parameters": {
@@ -2007,6 +2024,10 @@
                     {
                       "name": "AZURE_CLIENT_ID",
                       "value": "[parameters('workerIdentityClientId')]"
+                    },
+                    {
+                      "name": "AzureWebJobsStorage__accountName",
+                      "value": "[parameters('storageAccountName')]"
                     }
                   ],
                   "minTlsVersion": "1.2",

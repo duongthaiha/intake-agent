@@ -127,6 +127,11 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'AZURE_CLIENT_ID'
           value: workerIdentityClientId
         }
+        // Required for WebJobs host health check — uses identity-based auth (no shared key)
+        {
+          name: 'AzureWebJobsStorage__accountName'
+          value: storageAccountName
+        }
       ]
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
