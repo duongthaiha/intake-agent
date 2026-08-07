@@ -1,0 +1,20 @@
+{
+  "name": "Intake Agent",
+  "image": "ghcr.io/duongthaiha/python-azure-devcontainer:latest",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-azurecli",
+        "ms-azuretools.azd",
+        "eamodio.gitlens"
+      ]
+    }
+  },
+  "postCreateCommand": "echo \"Microsoft Skills available: $(ls ~/.copilot/skills 2>/dev/null | wc -l) under ~/.copilot/skills/\"",
+  "remoteUser": "vscode",
+  "runArgs": [
+    "--add-host=host.docker.internal:host-gateway"
+  ]
+}
