@@ -279,6 +279,7 @@ The model-facing orchestrator receives a small command set rather than repositor
 | `propose_field_updates` | Validate and persist candidate values with source and confidence | Yes |
 | `submit_for_review` | Validate completeness and request an allowed transition | Yes |
 | `record_review_feedback` | Store reviewer comments against a revision | Yes |
+| `request_review_changes` | Store required feedback and transition an in-review revision to Awaiting User Feedback | Yes |
 | `record_review_decision` | Approve or reject an immutable revision | Yes |
 | `request_document_generation` | Queue generation for an approved revision | Yes |
 | `get_request_status` | Return lifecycle and work-item status | No |
@@ -555,19 +556,33 @@ sequenceDiagram
     Dispatcher->>Bus: RequestSubmitted
     Bus->>Worker: Notify reviewer
     Reviewer->>Teams: Review action
-    Teams->>Agent: Comment, approve, or reject
-    Agent->>Domain: record_review_decision(commandId, revision)
-    Domain->>Domain: Enforce reviewer role and immutable revision
-    Domain->>DB: Commit decision, audit, and outbox
-    Dispatcher->>DB: Read committed outbox
-    Dispatcher->>Bus: RequestApproved
-    Bus->>Worker: Generate document
-    Worker->>Blob: Store versioned artifact
-    Worker->>DB: Record artifact through shared domain package
-    Dispatcher->>DB: Read artifact-result outbox
-    Dispatcher->>Bus: ArtifactRecorded
-    Bus->>Completion: ArtifactRecorded or DeliveryCompleted
-    Completion->>DB: complete_request_if_ready through shared domain package
+    Teams->>Agent: Request changes, approve, or reject
+    alt Request changes
+        Agent->>Domain: request_review_changes(commandId, revision, feedback)
+        Domain->>Domain: Enforce reviewer role and transition to Awaiting User Feedback
+        Domain->>DB: Commit feedback, transition, audit, and outbox
+        Dispatcher->>Bus: ChangesRequested
+        Bus->>Worker: Notify requester
+    else Reject
+        Agent->>Domain: record_review_decision(commandId, revision, reject)
+        Domain->>Domain: Enforce reviewer role and rejection rationale
+        Domain->>DB: Commit rejection, audit, and outbox
+        Dispatcher->>Bus: RequestRejected
+        Bus->>Worker: Notify requester
+    else Approve
+        Agent->>Domain: record_review_decision(commandId, revision, approve)
+        Domain->>Domain: Enforce reviewer role and immutable revision
+        Domain->>DB: Commit approval, audit, and outbox
+        Dispatcher->>DB: Read committed outbox
+        Dispatcher->>Bus: RequestApproved
+        Bus->>Worker: Generate document
+        Worker->>Blob: Store versioned artifact
+        Worker->>DB: Record artifact through shared domain package
+        Dispatcher->>DB: Read artifact-result outbox
+        Dispatcher->>Bus: ArtifactRecorded
+        Bus->>Completion: ArtifactRecorded or DeliveryCompleted
+        Completion->>DB: complete_request_if_ready through shared domain package
+    end
     Agent->>Domain: get_request_context on next turn
     Domain->>DB: Load completed status
 ```
@@ -733,6 +748,8 @@ Entra groups or app roles provide coarse roles. The Hosted Agent's deterministic
 Development, test, and production use separate Foundry projects and separate application/data resources. Production should use a separate subscription where enterprise policy requires a stronger trust boundary.
 
 Resource naming, tags, diagnostics, RBAC, budgets, locks, and policies are deployed with Bicep. GitHub Actions uses workload identity federation.
+
+Bicep is the infrastructure source of truth, and Azure Developer CLI (`azd`) is the shared deployment contract for developers and automation. The repository contains `azure.yaml` and an `infra/` folder; `azd provision`, `azd deploy`, and `azd up` respectively provision infrastructure, deploy application components, and perform the clean-environment end-to-end deployment. GitHub Actions authenticates through workload identity federation and invokes the same Bicep/`azd` contract rather than maintaining a separate deployment implementation. Secrets are never stored in committed parameter files or `azd` environment files.
 
 ### 14.2 Baseline enterprise variant
 
@@ -910,7 +927,8 @@ Thresholds are set after a documented baseline. A critical security or data-inte
 flowchart LR
     PR[Pull request] --> Static[Lint, type, unit, security scans]
     Static --> Build[Build agent and services]
-    Build --> DeployTest[Deploy test environment]
+    Build --> AzdTest[Run azd provision and azd deploy]
+    AzdTest --> DeployTest[Deploy test environment]
     DeployTest --> Tests[Integration, contract, E2E]
     Tests --> Eval[Start evaluation job and wait for signed scorecard]
     Eval --> Approval[Release approval]
@@ -947,12 +965,17 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | 9. Security, Privacy & Governance | Entra, agent identity, managed identity, Key Vault, private endpoints, retention, provenance |
 | 10. Reliability, Observability & Operations | Outbox, queues, retries, telemetry, dashboards, runbooks, rollback, restore |
 | 11. Experience & Accessibility | Teams-native UX, save/resume, clear errors, Adaptive Card validation, usability and WCAG testing |
+| 12. Azure Infrastructure & Deployment | Bicep modules, `azure.yaml`, `azd`, environment isolation, managed identities, network variants, GitHub Actions federation |
+| 13. POC Demo Script & Guide | Teams end-to-end scenario, resettable deployed environment, fixtures, expected outputs |
+| 14. Deployment & Success Verification | Clean-environment `azd up`, deployed smoke tests, private connectivity proof, signed release evidence |
+| 15. Architecture Decisions & Runbooks | ADR register, architecture/workflow diagrams, deployment/rollback/teardown runbooks, production gaps |
 
 ## 20. Delivery slices
 
 ### Slice 1: Foundation
 
 - Bicep modules and environment structure.
+- `azure.yaml` and an `azd` deployment contract shared by local and CI/CD deployment.
 - Foundry development project and Python Hosted Agent skeleton.
 - Customer-owned Cosmos DB, Storage, Search, Key Vault, monitoring, and managed identities.
 - Entra groups/app roles.
@@ -1011,6 +1034,7 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | ADR-008 | Support baseline and hardened deployment variants until compliance selects one | Accepted |
 | ADR-009 | Extract a Core service only for additional consumers, materially different scaling/release needs, or a required process trust boundary | Accepted |
 | ADR-010 | Build the deterministic core as a private `intake-domain` package bundled into the Hosted Agent and state-changing workers | Accepted |
+| ADR-011 | Use Bicep as the infrastructure source of truth and Azure Developer CLI (`azd`) as the shared local and CI/CD deployment contract | Accepted |
 
 ## 22. Risks and mitigations
 

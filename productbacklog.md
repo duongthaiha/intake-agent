@@ -5,15 +5,68 @@
 | Assumption | Why It Matters | Validation Needed |
 |---|---|---|
 | Solution is delivered via Microsoft Foundry Agent Service, published natively to Microsoft Teams (no custom bot host for MVP) | Determines channel integration, identity, and networking work | Confirmed in `architecture.md` §1, ADR-001 |
-| Data services are customer-owned Azure Cosmos DB (NoSQL), Azure Blob Storage, Azure AI Search, and Azure Service Bus, processed by Azure Functions workers | Drives Bicep modules, private endpoint scope, and RBAC design | Confirmed in `architecture.md` §1, §8.2, ADR-004, ADR-006 |
-| Infrastructure is authored in Bicep and deployed with Azure Developer CLI (`azd`) | Required for repeatable provisioning across environments | Confirmed in `architecture.md` §18, §20 (Slice 1) |
-| Both a network-baseline and a hardened (private-networking) deployment variant are supported until compliance selects one | Affects when private endpoints/VNet work becomes mandatory vs. optional | Open decision — `architecture.md` §21 ADR-008, §23 item 1 |
+| Data services are customer-owned Azure Cosmos DB (NoSQL), Azure Blob Storage, Azure AI Search, and Azure Service Bus; Azure Functions workers are the proposed asynchronous processing runtime | Drives Bicep modules, private endpoint scope, and RBAC design | Data services confirmed by `architecture.md` ADR-004; worker runtime proposed by ADR-006 |
+| Infrastructure is authored in Bicep and deployed with Azure Developer CLI (`azd`) | Required for repeatable provisioning across environments | Accepted in `architecture.md` ADR-011 |
+| Both a network-baseline and a hardened (private-networking) deployment variant are supported until compliance selects one | Requires both variants to remain deployable while leaving the final production selection open | Variant support accepted by `architecture.md` ADR-008; selection open in §23 item 1 |
 | Model, Azure region, and final production network topology are not yet finalised | Impacts quota, data residency, and Bicep parameterisation | Open decision — `architecture.md` §23 items 1–2 |
 | Single Microsoft Entra tenant, single enterprise organisation, no public/multi-tenant access for MVP | Simplifies identity and authorisation scope | Confirmed in `architecture.md` §2.1–2.2 |
 
 ## POC Goal
 
-Prove that a Python Hosted Agent, published natively to Microsoft Teams through Microsoft Foundry Agent Service, can guide a requester through structured intake, detect gaps and contradictions, route the result through human review, generate an approved document, and hand the approved request to a downstream system — while keeping deterministic authorization, validation, persistence, and audit logic outside model control, and while proving the deployment is repeatable (Bicep + `azd`) and privacy/security-shaped (managed identity, Key Vault, private data-service access) from the first milestone.
+Prove that a Python Hosted Agent, published natively to Microsoft Teams through Microsoft Foundry Agent Service, can guide a requester through structured intake, detect gaps and contradictions, route the result through human review, generate an approved document, and validate handover through a versioned downstream contract — while keeping deterministic authorization, validation, persistence, and audit logic outside model control, and while proving the deployment is repeatable (Bicep + `azd`) and privacy/security-shaped (managed identity, Key Vault, private data-service access) from the first milestone.
+
+### POC Success Criteria
+
+| ID | Criterion | Required Evidence | Accountable Owner |
+|---|---|---|---|
+| POC-01 | A requester completes intake, clarification, submission, reviewer feedback, resubmission, and approval in Teams without an administrator changing data manually | Recorded end-to-end test and demo evidence from a deployed environment | Product |
+| POC-02 | Every accepted field update is persisted before success is shown; an interrupted session resumes from the persisted request | Integration and recovery test evidence | Engineering |
+| POC-03 | Only an assigned reviewer or authorised administrator can approve or reject; the approved revision is immutable | Authorisation, state-transition, and concurrency test evidence | Security |
+| POC-04 | Word/PDF artifacts are generated only from the immutable approved revision and retain source/version metadata | Artifact contract test and deployed workflow evidence | Engineering |
+| POC-05 | One approved request is delivered through the versioned downstream contract to either the selected first integration or an authenticated contract-test stub, without duplicate effects on retry | Contract, idempotency, and deployed smoke-test evidence | Engineering |
+| POC-06 | Model-facing code cannot import repositories, Azure SDK clients, credential providers, or mutable identity implementations; the Hosted Agent and state-changing workers use the same approved `intake-domain` version | Import-boundary CI results and release manifest | Architecture |
+| POC-07 | `azd up` provisions and deploys a clean environment from Bicep, and deployed workloads reach customer-owned data services through the selected private-endpoint topology | Deployment log, Bicep preflight result, DNS/connectivity evidence | DevOps |
+| POC-08 | Epic 7 quality thresholds pass with no critical security or data-integrity failure, and the release baseline for the provisional service objectives in `architecture.md` §3.1 is met | Signed evaluation scorecard, performance results, frozen-baseline record, and approval record | Product |
+
+POC criteria and thresholds are frozen before release-candidate evaluation begins. A scope or threshold change creates a new approved baseline and requires a new release candidate and complete evaluation; the failed result remains in the release evidence.
+
+## Accountable Ownership
+
+The owner type is accountable for acceptance and evidence; delivery may involve additional disciplines.
+
+| Stories | Owner Type |
+|---|---|
+| 1.1, 1.2 | Product |
+| 1.3 | Engineering |
+| 2.1, 2.2 | Product |
+| 3.1 | Engineering |
+| 3.2 | Product |
+| 4.1 | Data |
+| 4.2 | Engineering |
+| 5.1, 5.2 | Product |
+| 6.1 | Engineering |
+| 6.2 | Architecture |
+| 7.1 | Product |
+| 7.2 | Data |
+| 7.3 | Product |
+| 8.1 | Engineering |
+| 8.2 | Security |
+| 8.3 | Engineering |
+| 8.4 | Architecture |
+| 9.1 | Security |
+| 9.2 | Data |
+| 9.3, 9.4 | Security |
+| 10.1 | DevOps |
+| 10.2 | Engineering |
+| 10.3 | DevOps |
+| 11.1, 11.2 | Product |
+| 12.1, 12.2 | DevOps |
+| 12.3 | Architecture |
+| 13.1 | Product |
+| 13.2, 14.1 | DevOps |
+| 14.2 | Product |
+| 15.1 | Architecture |
+| 15.2 | DevOps |
 
 ## Epic 1: Structured Requirements Capture
 
@@ -95,14 +148,14 @@ Prove that a Python Hosted Agent, published natively to Microsoft Teams through 
 
 ## Epic 3: Output Generation
 
-### User Story 3.1: Generate Structured Requirements Document
+### User Story 3.1: Generate Approved Requirements Document
 
-*As a user, I want the agent to generate a document so that requirements can be shared with stakeholders.*
+*As a user, I want the agent to generate a document from the approved revision so that requirements can be shared with stakeholders.*
 
 **Acceptance Criteria**
 
-- Generate Word/PDF output.
-- Populate all collected fields into a defined format.
+- Generate Word/PDF output only after an assigned reviewer or authorised administrator approves the revision.
+- Populate the immutable approved revision into a defined format.
 - Include gaps, assumptions, and open questions.
 - Include metadata (date, owner, status).
 - Generated content is traceable to captured inputs.
@@ -111,19 +164,19 @@ Prove that a Python Hosted Agent, published natively to Microsoft Teams through 
 
 **Priority:** Must Have (MVP)
 
-### User Story 3.2: User Approval Process
+### User Story 3.2: Pre-Submission Review and Reviewer Approval
 
-*As a user, I want to review the output before it is finalised.*
+*As a requester, I want to review the captured requirements before submission and receive an authorised review decision so that errors can be corrected before finalisation.*
 
 **Acceptance Criteria**
 
-- User reviews generated output.
-- User can approve or request edits.
-- Agent supports multiple review iterations.
+- Requester reviews and corrects captured requirements before submitting an immutable revision.
+- Assigned reviewer or authorised administrator can approve, reject, or request changes; the requester cannot self-approve unless policy explicitly grants that role.
+- Requested changes create a new immutable revision and review iteration.
 - Final approval timestamp recorded.
 - Each review iteration creates a versioned record.
 - Approval authority is enforced by role.
-- The approved version is immutable; later changes require a new review cycle.
+- The approved revision is immutable; later changes require a new revision and review cycle.
 
 **Priority:** Must Have (MVP)
 
@@ -180,7 +233,7 @@ The discussion explicitly referenced a ticket-like lifecycle with multiple stage
 
 **Acceptance Criteria**
 
-- Reviewer can edit captured content.
+- Reviewer cannot edit the requester's captured content; the reviewer requests changes against an immutable revision.
 - Reviewer can add comments.
 - Reviewer can approve or reject.
 - Reviewer feedback is stored.
@@ -222,8 +275,9 @@ The team discussed feeding approved outputs into downstream services or agents.
 - Use authenticated, versioned integration contracts.
 - Prevent duplicate downstream processing through idempotency controls.
 - Expose failed deliveries for retry or manual recovery.
+- For the POC, deliver to the selected first integration or an authenticated contract-test stub; selecting and productionising a real downstream target remains an explicit architecture decision.
 
-**Priority:** High
+**Priority:** Must Have (POC)
 
 ### User Story 6.2: Agent-to-Agent Handover
 
@@ -329,6 +383,20 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 **Priority:** Must Have (MVP Release Gate)
 
+### User Story 8.4: Deterministic Package and Dependency Boundaries
+
+*As an architecture owner, I want enforceable package boundaries so that model-facing code cannot bypass deterministic authorization, validation, persistence, or identity controls.*
+
+**Acceptance Criteria**
+
+- The repository produces a private, versioned `intake-domain` Python package shared by the Hosted Agent and all state-changing workers.
+- CI import-boundary contracts fail when channel/orchestration code imports persistence modules, repositories, Azure SDK clients, credential providers, or mutable identity implementations.
+- The domain layer contains no Foundry-specific types and depends only on the Python standard library and approved domain-only dependencies.
+- The package is built once per release; the Hosted Agent and state-changing workers are promoted with the same approved version.
+- Release evidence records the package version for every deployed component and fails promotion when versions are incompatible.
+
+**Priority:** Must Have (MVP Release Gate)
+
 ## Epic 9: Security, Privacy & Governance
 
 ### User Story 9.1: Identity and Access Control
@@ -386,7 +454,7 @@ The team discussed feeding approved outputs into downstream services or agents.
 - Both the network-baseline and hardened deployment variants are represented in Bicep until the production topology is confirmed (Epic 12).
 - Deployed app-to-database private connectivity is validated from the deployed host, not a developer machine.
 
-**Owner:** Architecture / Security
+**Owner:** Security (Architecture consulted)
 
 **Priority:** Must Have (MVP Release Gate)
 
@@ -471,11 +539,13 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 **Acceptance Criteria**
 
-- An `infra/` folder contains Bicep modules for Foundry project, Hosted Agent hosting, Cosmos DB, Blob Storage, Azure AI Search, Service Bus, Azure Functions, Key Vault, and monitoring resources.
+- An `infra/` folder contains Bicep modules for the Foundry project, Hosted Agent hosting, Azure Bot Service resource/association where supported, Cosmos DB, Blob Storage, Azure AI Search, Service Bus, Azure Functions, the private Container Apps evaluation job, evaluation evidence storage, Key Vault, monitoring, networking, workload identities, and the dedicated notification Entra application.
 - Parameters cover environment-specific values (region, SKU, network mode); no secrets are stored in parameter files.
-- Modules are used once a resource group becomes too large to reason about as a single template.
+- Separate modules define each independently deployed or permission-scoped resource group: identity, network/private DNS, data services, messaging, agent/worker compute, evaluation, and observability.
 - Outputs expose values required by application/`azd` configuration (endpoints, resource IDs, connection settings).
 - Bicep linting and a `what-if`/preflight check run before deployment.
+- Bicep applies required naming, tags, diagnostics, RBAC, budgets, locks, and Azure Policy assignments consistently by environment.
+- A component/provisioner matrix identifies whether each resource or deployable component is created by Bicep, Foundry publishing, `azd`, or Microsoft 365 administration; no architecture component is left without an owner and provisioning path.
 
 **Owner:** DevOps
 
@@ -487,7 +557,7 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 **Acceptance Criteria**
 
-- `azure.yaml` at the repository root maps the Hosted Agent and each Functions worker to its Azure host.
+- `azure.yaml` at the repository root maps every source-deployed component to its Azure host, including the Hosted Agent, Functions workers, and Container Apps evaluation job; the component/provisioner matrix records resources handled by Foundry publishing or Microsoft 365 administration instead.
 - `azd provision`, `azd deploy`, and `azd up` succeed end-to-end against a clean environment.
 - Required `azd env` values are documented; no secrets are committed to `azd` environment files.
 - Managed identity is used for Azure resource access; secrets that cannot use managed identity are stored in Key Vault.
@@ -520,7 +590,7 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 **Acceptance Criteria**
 
-- Script drives the primary Teams workflow: intake, clarification, submission, review, feedback, approval, document generation, and downstream handover.
+- Script drives the primary Teams workflow: intake, clarification, submission, review, feedback, approval, document generation, and handover through the versioned downstream contract to the selected integration or contract-test stub.
 - Script lists prerequisites, environment setup, and required test fixtures (sample requester/reviewer accounts, seed template).
 - Expected outputs and screenshots/recordings are captured so a presenter can immediately spot a broken demo.
 - Script is validated against a deployed environment, not only a local build.
@@ -567,7 +637,7 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 - Each success criterion from the POC Goal and provisional service objectives (`architecture.md` §3.1) is checked against the deployed system.
 - Results are recorded alongside the Epic 7 evaluation scorecard and release evidence.
-- Any unmet criterion is logged as a decision item or deferred-scope item, not silently dropped.
+- Any unmet mandatory POC criterion blocks that release candidate. A scope or threshold change requires Product, Architecture, and Security approval, a new frozen baseline, and a new candidate evaluation; the original failure remains in the release record.
 
 **Owner:** Product
 
@@ -607,11 +677,13 @@ The team discussed feeding approved outputs into downstream services or agents.
 
 | Decision | Recommended Default | Status |
 |---|---|---|
-| IaC | Bicep (`infra/` folder, modules per resource group size) | Accepted — `architecture.md` ADR references §21 |
-| Deployment | Azure Developer CLI with `azure.yaml` and `infra/` | Accepted |
-| Data services | Customer-owned Cosmos DB, Blob Storage, Azure AI Search, Service Bus, processed by Azure Functions | Accepted — ADR-004, ADR-006 |
-| Database/network access | Private endpoint + private DNS; public access disabled where supported | Proposed until production topology confirmed — ADR-008 |
-| Credentials | Managed identity first; Key Vault for secrets that cannot use managed identity | Accepted |
+| IaC | Bicep (`infra/` folder, modules by independently deployed or permission-scoped concern) | Accepted — ADR-011 |
+| Deployment | Azure Developer CLI with `azure.yaml` and `infra/`; GitHub Actions invokes the same deployment contract | Accepted — ADR-011 |
+| Customer-owned data services | Cosmos DB, Blob Storage, Azure AI Search, and Service Bus | Accepted — ADR-004 |
+| Asynchronous worker runtime | Azure Functions | Proposed — ADR-006 |
+| Deployment variants | Maintain baseline and hardened variants until compliance selects one | Accepted — ADR-008 |
+| Data-service network access | Private endpoints + private DNS in both variants; public access disabled where supported | Accepted architecture principle and §14 requirement |
+| Credentials | Managed identity first; Key Vault for exceptional secrets | Accepted architecture principle and §13 requirement |
 | Production network topology | Baseline vs. hardened — pending security/compliance confirmation | Open — `architecture.md` §23 item 1 |
 | Model and Azure region | Pending Foundry Hosted Agent, tool, data-residency, and quota check | Open — `architecture.md` §23 item 2 |
 | Word/PDF generation runtime | Functions vs. Container Apps job — pending library/runtime constraint check | Open — `architecture.md` §23 item 5 |
@@ -633,7 +705,7 @@ A Must Have (MVP) story is complete only when:
 - The release candidate meets all Epic 7 evaluation thresholds with no critical regression.
 - Security, privacy, authorisation, audit, and data-lifecycle controls are verified.
 - Operational telemetry, alerts, recovery procedures, and rollback procedures are available.
-- Infrastructure is represented in Bicep and `azd` can provision and deploy the workload, or a story exists to close the gap.
+- Infrastructure is represented in Bicep and `azd` successfully provisions and deploys the workload from a clean environment.
 - Database and data-service networking uses the private endpoint/private DNS design, with public access disabled where supported.
 - A clean-environment deployment is verified and each POC success criterion is checked against the deployed system (Epic 14).
 - A demo script and an operational runbook are documented, with architecture decisions and workflow diagrams committed (Epics 13 and 15).
