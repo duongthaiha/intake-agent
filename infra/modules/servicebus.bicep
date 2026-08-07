@@ -25,7 +25,7 @@ resource sbNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
   }
   properties: {
     minimumTlsVersion: '1.2'
-    disableLocalAuth: false
+    disableLocalAuth: true  // Require identity-based auth; SAS connection strings disabled
     publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
   }
 }
@@ -61,12 +61,45 @@ resource dlqRecoveryQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-pre
   }
 }
 
+resource documentGenerationQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: sbNamespace
+  name: 'document-generation'
+  properties: {
+    maxDeliveryCount: 10
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P14D'
+    deadLetteringOnMessageExpiration: true
+    enablePartitioning: false
+    requiresDuplicateDetection: false
+    requiresSession: false
+  }
+}
+
+resource notificationQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: sbNamespace
+  name: 'notification-queue'
+  properties: {
+    maxDeliveryCount: 10
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P14D'
+    deadLetteringOnMessageExpiration: true
+    enablePartitioning: false
+    requiresDuplicateDetection: false
+    requiresSession: false
+  }
+}
+
 // ---------------------------------------------------------------------------
 // RBAC
 // ---------------------------------------------------------------------------
 
 var sbDataSenderRoleId = '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
-var sbDataReceiverRoleId = '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0'
+// FC1 SB trigger scale controller requires Data Owner (or a custom role with
+// Microsoft.ServiceBus/namespaces/*/read) for accurate queue-depth scaling.
+// Without it the extension silently falls back to peek-based estimation and
+// SB-group instances may never start.  Ref: Azure Functions SB trigger docs –
+// "Identity-based connections" section.
+var sbDataOwnerRoleId = '090c5cfd-751d-490a-894a-3ce6f1109419'
 
 resource agentSbSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(sbNamespace.id, agentIdentityPrincipalId, sbDataSenderRoleId)
@@ -78,22 +111,13 @@ resource agentSbSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource workerSbReceiver 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sbNamespace.id, workerIdentityPrincipalId, sbDataReceiverRoleId)
+// Worker requires Data Owner so the FC1 scale controller can read queue metrics
+// (includes Send + Receive + Manage). Replaces the separate Sender/Receiver pair.
+resource workerSbOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sbNamespace.id, workerIdentityPrincipalId, sbDataOwnerRoleId)
   scope: sbNamespace
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', sbDataReceiverRoleId)
-    principalId: workerIdentityPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// Worker also needs to send (outbox relay sends to DLQ recovery)
-resource workerSbSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sbNamespace.id, workerIdentityPrincipalId, sbDataSenderRoleId)
-  scope: sbNamespace
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', sbDataSenderRoleId)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', sbDataOwnerRoleId)
     principalId: workerIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
@@ -107,3 +131,5 @@ output namespaceId string = sbNamespace.id
 output namespaceName string = sbNamespace.name
 output namespaceFqdn string = '${sbNamespace.name}.servicebus.windows.net'
 output queueName string = domainEventsQueue.name
+output documentGenerationQueueName string = documentGenerationQueue.name
+output notificationQueueName string = notificationQueue.name

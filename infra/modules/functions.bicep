@@ -79,6 +79,16 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
       scaleAndConcurrency: {
         maximumInstanceCount: 100
         instanceMemoryMB: 2048
+        // Keep 1 always-ready instance for each SB trigger function group so
+        // the listener is persistently active.  Without this FC1 only starts
+        // SB-group instances when the external scale controller detects backlog
+        // via queue-depth metrics, which requires Data Owner and can be delayed.
+        // FC1 alwaysReady name format: "function:<functionName>"
+        alwaysReady: [
+          { name: 'function:domain_event_dispatcher', instanceCount: 1 }
+          { name: 'function:document_worker', instanceCount: 1 }
+          { name: 'function:notification_worker', instanceCount: 1 }
+        ]
       }
       runtime: {
         name: 'python'
@@ -131,6 +141,14 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'AzureWebJobsStorage__accountName'
           value: storageAccountName
+        }
+        {
+          name: 'AzureWebJobsStorage__credential'
+          value: 'managedidentity'
+        }
+        {
+          name: 'AzureWebJobsStorage__clientId'
+          value: workerIdentityClientId
         }
       ]
       minTlsVersion: '1.2'
