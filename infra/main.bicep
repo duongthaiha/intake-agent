@@ -28,6 +28,9 @@ param deployBotService bool = false
 @description('Deploy private endpoints and configure public network access. Set true only after connectivity spike confirms Foundry → private data-plane path.')
 param deployPrivateEndpoints bool = false
 
+@description('Deploy ONLY the storage blob private endpoint to enable in-VNet FC1 deployment (bypasses publicNetworkAccess:Disabled policy) without enabling all other PEs.')
+param deployStoragePrivateEndpoint bool = false
+
 @description('Override region for AI Search service only. eastus2 has been observed to have InsufficientResourcesAvailable for new AI Search services; set to eastus as fallback.')
 param searchServiceLocation string = 'eastus'
 
@@ -98,6 +101,7 @@ module network 'modules/network.bicep' = {
     tags: tags
     vnetName: 'vnet-intake-${environmentName}'
     deployPrivateEndpoints: deployPrivateEndpoints
+    deployStoragePrivateEndpoint: deployStoragePrivateEndpoint
     cosmosAccountName: cosmosAccountName
     storageAccountName: storageAccountName
     serviceBusNamespaceName: serviceBusName

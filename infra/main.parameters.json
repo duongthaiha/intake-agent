@@ -19,6 +19,9 @@
     },
     "deployPrivateEndpoints": {
       "value": false
+    },
+    "deployStoragePrivateEndpoint": {
+      "value": true
     }
   }
 }

@@ -7,6 +7,8 @@ param location string
 param tags object
 param vnetName string
 param deployPrivateEndpoints bool
+@description('Deploy only the storage blob private endpoint (enables in-VNet FC1 deployment without enabling all PEs).')
+param deployStoragePrivateEndpoint bool = false
 
 // Resource names of data services (used for private endpoint creation)
 param cosmosAccountName string
@@ -121,7 +123,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existi
   name: cosmosAccountName
 }
 
-resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = if (deployPrivateEndpoints) {
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = if (deployPrivateEndpoints || deployStoragePrivateEndpoint) {
   name: storageAccountName
 }
 
@@ -174,7 +176,7 @@ resource cosmosPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDn
   }
 }
 
-resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = if (deployPrivateEndpoints) {
+resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = if (deployPrivateEndpoints || deployStoragePrivateEndpoint) {
   name: 'pe-${storageAccountName}-blob'
   location: location
   tags: tags
@@ -192,7 +194,7 @@ resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' 
   }
 }
 
-resource storagePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = if (deployPrivateEndpoints) {
+resource storagePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = if (deployPrivateEndpoints || deployStoragePrivateEndpoint) {
   parent: storagePrivateEndpoint
   name: 'default'
   properties: {
