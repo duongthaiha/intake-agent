@@ -1,0 +1,76 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "speak": "Error. ${error_title}. ${error_message}. ${retry_hint}",
+  "body": [
+    {
+      "type": "Container",
+      "style": "attention",
+      "bleed": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "❌ ${error_title}",
+          "weight": "Bolder",
+          "size": "Medium",
+          "color": "Attention",
+          "wrap": true,
+          "id": "heading"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "${error_message}",
+      "wrap": true,
+      "spacing": "Medium",
+      "id": "error_body"
+    },
+    {
+      "type": "FactSet",
+      "spacing": "Small",
+      "id": "error_details",
+      "isVisible": "${show_details}",
+      "facts": [
+        {
+          "title": "Error code",
+          "value": "${error_code}"
+        },
+        {
+          "title": "Reference",
+          "value": "${correlation_id}"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "${retry_hint}",
+      "wrap": true,
+      "spacing": "Medium",
+      "isSubtle": true,
+      "isVisible": "${show_retry_hint}",
+      "id": "retry_hint"
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Try Again",
+      "verb": "${retry_verb}",
+      "data": "${retry_data}",
+      "tooltip": "Retry the last action",
+      "style": "positive",
+      "isVisible": "${retry_eligible}",
+      "id": "btn_retry"
+    },
+    {
+      "type": "Action.OpenUrl",
+      "title": "Get Help",
+      "url": "${help_url}",
+      "tooltip": "Open support documentation",
+      "isVisible": "${show_help_link}",
+      "id": "btn_help"
+    }
+  ]
+}

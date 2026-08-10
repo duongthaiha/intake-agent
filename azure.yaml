@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+requiredVersions:
+    extensions:
+        azure.ai.agents: '>=1.0.0-beta.9'
+name: intake-agent
+metadata:
+    template: intake-agent@0.1.0
+services:
+    ai-project:
+        host: azure.ai.project
+        endpoint: https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev
+    intake-agent:
+        project: .
+        host: azure.ai.agent
+        language: python
+        uses:
+            - ai-project
+        env:
+            AZURE_CLIENT_ID: ${AGENT_IDENTITY_CLIENT_ID}
+            AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+            INTAKE_BLOB_BACKEND: azure
+            INTAKE_BLOB_CONTAINER_ARTIFACTS: ${AZURE_STORAGE_ARTIFACTS_CONTAINER}
+            INTAKE_BLOB_ENDPOINT: ${AZURE_STORAGE_BLOB_ENDPOINT}
+            INTAKE_COSMOS_DATABASE: ${AZURE_COSMOS_DATABASE}
+            INTAKE_COSMOS_ENDPOINT: ${AZURE_COSMOS_ENDPOINT}
+            INTAKE_COSMOS_IDEMPOTENCY_CONTAINER: ${AZURE_COSMOS_IDEMPOTENCY_CONTAINER}
+            INTAKE_COSMOS_REQUESTS_CONTAINER: ${AZURE_COSMOS_REQUESTS_CONTAINER}
+            INTAKE_COSMOS_TEMPLATES_CONTAINER: ${AZURE_COSMOS_TEMPLATES_CONTAINER}
+            INTAKE_ENVIRONMENT: ${AZURE_ENV_NAME}
+            INTAKE_HOSTED_AGENT_IDENTITY: intake-agent
+            INTAKE_HOSTED_TENANT_ID: ${AZURE_TENANT_ID}
+            INTAKE_PERSISTENCE_BACKEND: cosmos
+            INTAKE_SERVICEBUS_BACKEND: azure
+            INTAKE_SERVICEBUS_NAMESPACE: ${AZURE_SERVICEBUS_NAMESPACE}
+            INTAKE_SERVICEBUS_QUEUE: ${AZURE_SERVICEBUS_QUEUE}
+        codeConfiguration:
+            dependencyResolution: remote_build
+            entryPoint: hosted_main.py
+            runtime: python_3_13
+        startupCommand: python hosted_main.py
+        container:
+            resources:
+                cpu: "0.5"
+                memory: 1Gi
+        kind: hosted
+        name: intake-agent
+        description: Captures and validates structured enterprise intake requests.
+        protocols:
+            - protocol: responses
+              version: 2.0.0
+    workers:
+        resourceName: func-intake-${AZURE_ENV_NAME}
+        project: src/intake_workers
+        host: function
+        language: python
+        hooks:
+            prepackage:
+                windows:
+                    shell: pwsh
+                    run: >-
+                        Copy-Item ..\intake_domain .\intake_domain -Recurse -Force;
+                        Copy-Item ..\intake_persistence .\intake_persistence -Recurse -Force
+                posix:
+                    shell: sh
+                    run: >-
+                        cp -R ../intake_domain ./intake_domain &&
+                        cp -R ../intake_persistence ./intake_persistence
+            postpackage:
+                windows:
+                    shell: pwsh
+                    run: >-
+                        Remove-Item .\intake_domain,.\intake_persistence -Recurse -Force
+                posix:
+                    shell: sh
+                    run: rm -rf ./intake_domain ./intake_persistence
+infra:
+    provider: bicep
+    path: infra
+    module: main
+hooks:
+    postprovision:
+        windows:
+            shell: pwsh
+            run: scripts/azure/post-deploy-verify.ps1
+            continueOnError: true
+        posix:
+            shell: sh
+            run: scripts/azure/post-deploy-verify.sh
+            continueOnError: true
+    preprovision:
+        windows:
+            shell: pwsh
+            run: scripts/azure/preflight.ps1
+            interactive: true
+        posix:
+            shell: sh
+            run: scripts/azure/preflight.sh
+            interactive: true

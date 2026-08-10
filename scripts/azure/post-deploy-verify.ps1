@@ -35,10 +35,46 @@ foreach ($r in $resources) {
   if ($state -eq "Succeeded") { Pass "$($r.label): $($r.name)" } else { Fail "$($r.label): $($r.name) ($state)" }
 }
 
+$databaseName = "intake"
+$expectedContainers = @{
+  "request-state" = "/requestId"
+  "templates" = "/templateId"
+  "idempotency" = "/scopeId"
+}
+foreach ($container in $expectedContainers.GetEnumerator()) {
+  $partitionKey = az cosmosdb sql container show `
+    --resource-group $RgName `
+    --account-name $cosmosName `
+    --database-name $databaseName `
+    --name $container.Key `
+    --query "resource.partitionKey.paths[0]" -o tsv 2>$null
+  if ($partitionKey -eq $container.Value) {
+    Pass "Cosmos container $($container.Key): $partitionKey"
+  } else {
+    Fail "Cosmos container $($container.Key): expected $($container.Value), got $partitionKey"
+  }
+}
+
+$durableQueue = az servicebus queue show `
+  --resource-group $RgName `
+  --namespace-name $sbName `
+  --name "domain-events-durable" `
+  --query "{name:name,duplicate:requiresDuplicateDetection,status:status}" -o json 2>$null |
+  ConvertFrom-Json
+if ($durableQueue.name -eq "domain-events-durable" -and
+    $durableQueue.duplicate -eq $true -and
+    $durableQueue.status -eq "Active") {
+  Pass "Service Bus durable outbox queue: active with duplicate detection"
+} else {
+  Fail "Service Bus durable outbox queue is missing or misconfigured"
+}
+
 Sect "Functions"
-$funcState = az functionapp show --name "func-intake-$EnvName" --resource-group $RgName `
-  --subscription $SubscriptionId --query "properties.state" -o tsv 2>$null
-if ($funcState) { Pass "Functions: func-intake-$EnvName ($funcState)" } else { Fail "Functions not found" }
+$funcName = "func-intake-$EnvName"
+$funcId = "/subscriptions/$SubscriptionId/resourceGroups/$RgName/providers/Microsoft.Web/sites/$funcName"
+$funcState = az resource show --ids $funcId --api-version 2023-12-01 `
+  --query "properties.state" -o tsv 2>$null
+if ($funcState -eq "Running") { Pass "Functions: $funcName ($funcState)" } else { Fail "Functions: $funcName ($funcState)" }
 
 Write-Host "`n━━━ Summary ━━━"
 Write-Host "  Passed: $pass  Failed: $fail"

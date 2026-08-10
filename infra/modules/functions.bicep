@@ -12,6 +12,9 @@ param workerIdentityId string
 param workerIdentityClientId string
 param cosmosEndpoint string
 param cosmosDatabase string
+param cosmosRequestsContainer string
+param cosmosTemplatesContainer string
+param cosmosIdempotencyContainer string
 param serviceBusNamespace string
 param serviceBusQueue string
 param blobEndpoint string
@@ -104,8 +107,28 @@ resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
           value: cosmosDatabase
         }
         {
+          name: 'INTAKE_COSMOS_REQUESTS_CONTAINER'
+          value: cosmosRequestsContainer
+        }
+        {
+          name: 'INTAKE_COSMOS_TEMPLATES_CONTAINER'
+          value: cosmosTemplatesContainer
+        }
+        {
+          name: 'INTAKE_COSMOS_IDEMPOTENCY_CONTAINER'
+          value: cosmosIdempotencyContainer
+        }
+        {
           name: 'INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace'
           value: serviceBusNamespace
+        }
+        {
+          name: 'INTAKE_SERVICEBUS_NAMESPACE__credential'
+          value: 'managedidentity'
+        }
+        {
+          name: 'INTAKE_SERVICEBUS_NAMESPACE__clientId'
+          value: workerIdentityClientId
         }
         {
           name: 'INTAKE_SERVICEBUS_QUEUE'

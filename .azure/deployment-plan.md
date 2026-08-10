@@ -1,6 +1,6 @@
 ﻿# Azure Deployment Plan
 
-> **Status:** ✅ **Deployed** — All 13 Azure resources provisioned in `rg-intake-dev` (eastus2). Workers package deployed via in-VNet Container Apps Job (Flex One Deploy to Kudu /api/publish). 4 functions loaded and running: `domain_event_dispatcher`, `document_worker`, `notification_worker`, `outbox_dispatcher`. RBAC verified: all runtime identities least-privilege data-plane only. SB trigger `domain_event_dispatcher` confirmed executing (3 smoke messages consumed 2026-08-07T21:57:22Z). Final timestamp: 2026-08-07T23:05:00Z.
+> **Status:** ✅ **Deployed** — Production-durable Hosted Agent `intake-agent:8` is active, privately verified, and backed by Cosmos DB, Blob Storage, and Service Bus through managed identity.
 
 Generated: 2026-08-07T16:08:46Z
 Revised: 2026-08-07T16:22:00Z (Tank — Fact Checker revision cycle)
@@ -1560,3 +1560,647 @@ Only change on Function App: instanceMemoryMB: 2048 → 512 + lwaysReady remove
 
 ### Follow-up (No Immediate Action)
 - Stale Azure Service Bus Data Sender and Azure Service Bus Data Receiver role assignments on worker UAI remain (redundant since Data Owner supersedes both). **Not removed** — role deletion is destructive and requires explicit user confirmation. Record for next RBAC hygiene review.
+
+---
+
+## Section 30 — Cold-Scale Independent Verification (Switch, 2026-08-07T23:33–23:55 UTC)
+
+**Requested by:** Ha Duong  
+**Executed by:** Switch (Quality Engineer) — live Azure CLI session, no IaC/code edits  
+**Purpose:** Post-cost-optimisation independent verification: confirm `alwaysReady=null`, `instanceMemoryMB=512`, queues empty, send correlated probe message, measure cold-scale latency for `domain_event_dispatcher`, verify RBAC and storage posture, remove temp role.
+
+---
+
+### 30.1 Static Config Checks
+
+| Check | Evidence | Result |
+|-------|----------|--------|
+| Function App state | ARM REST: `properties.state = Running` | ✅ |
+| httpsOnly | ARM REST: `properties.httpsOnly = true` | ✅ |
+| `alwaysReady` | `functionAppConfig.scaleAndConcurrency.alwaysReady = null` | ✅ |
+| `instanceMemoryMB` | `functionAppConfig.scaleAndConcurrency.instanceMemoryMB = 512` | ✅ |
+| `maximumInstanceCount` | 100 | ✅ |
+| Runtime | Python 3.11 | ✅ |
+| 4 functions registered, none disabled | `document_worker`, `domain_event_dispatcher`, `notification_worker`, `outbox_dispatcher` | ✅ |
+| FC1 plan | `asp-intake-dev` SKU=FC1 | ✅ |
+
+### 30.2 Queue State (Pre-Probe)
+
+| Queue | Active | DLQ |
+|-------|--------|-----|
+| document-generation | 0 | 0 |
+| domain-events | 0 | 0 |
+| domain-events-dlq-recovery | 0 | 0 |
+| notification-queue | 0 | 0 |
+
+All 4 queues confirmed empty before probe. ✅
+
+### 30.3 Storage / Network Posture
+
+| Check | Value | Result |
+|-------|-------|--------|
+| `publicNetworkAccess` | `Disabled` | ✅ |
+| `allowSharedKeyAccess` | `false` | ✅ |
+| Blob PE `st2k2osaevug.18dc6d94-…` | `Approved` | ✅ |
+
+### 30.4 RBAC Posture
+
+| Principal | Scope | Roles | Result |
+|-----------|-------|-------|--------|
+| Worker UAI (`id-intake-worker-dev`) | SB namespace | Data Owner + stale Sender + stale Receiver | ✅ (Owner supersedes; stale roles harmless, noted) |
+| Worker UAI | RG (`rg-intake-dev`) | *(none)* | ✅ No Owner/Contributor |
+| Temp deployment runner | Any | *(not present)* | ✅ Absent |
+| Current user pre-probe | SB namespace | *(none)* | ✅ No pre-existing role |
+
+### 30.5 Temporary Role Assignment / Removal
+
+| Step | Detail | Result |
+|------|--------|--------|
+| Assign | `Azure Service Bus Data Sender` → user OID `8bde9e45-7543-4aeb-a75f-12d724ea657e` on SB namespace; RA ID `dc5c0caf-8f73-4114-a04a-888c4f8d03a3` | ✅ |
+| Send probe | CorrelationId `switch-cold-scale-20260807-a9378d7b-ec7d-4c75-a6fb-326ffe61bebf`; sent 2026-08-07T22:33:26Z via `azure-servicebus` Python SDK + `DefaultAzureCredential` | ✅ |
+| Remove | `az role assignment delete --ids dc5c0caf-…` | ✅ |
+| Confirm removal | `az role assignment list --assignee ... --scope $SBId` → empty | ✅ |
+
+### 30.6 Cold-Scale Probe Result
+
+**Probe message sent:** 2026-08-07T22:33:26Z  
+**Observation window:** 22:33–22:48 UTC (~20 minutes)  
+**`domain-events` queue state at close of window:** `activeMessageCount=1` (unconsumed)
+
+| Observation | Detail |
+|-------------|--------|
+| `outbox_dispatcher` (timer) fired | 22:40:00Z, 22:45:00Z — Function App IS running ✅ |
+| `domain_event_dispatcher` execution | **None** — no invocation in App Insights `requests` table in 2-hour window |
+| App Insights exceptions | None in 2-hour window ✅ |
+| Host cold-start log | Instance started 22:43:40Z for timer group; `"Function group target is function:outbox_dispatcher"` logged ×4 |
+| Active instances at query time | 0 (ARM `/instances` API returned empty) |
+| DLQ messages | 0 — probe message not dead-lettered, still active |
+
+**Cold-scale latency for `domain_event_dispatcher`: NOT MEASURED — trigger did not fire within 20-minute window.**
+
+### 30.7 Root Cause Analysis
+
+Two probable causes for `domain_event_dispatcher` not consuming the probe message:
+
+**Cause A — Flex Consumption SB scale controller credential gap:**  
+The storage binding is fully configured for user-assigned MI:
+```
+AzureWebJobsStorage__accountName     = st2k2osaevug
+AzureWebJobsStorage__clientId        = 9d3dc21a-5180-4c31-aaed-5c98d6d01ace
+AzureWebJobsStorage__credential      = managedidentity
+```
+The SB binding is missing `__credential` and `__clientId`:
+```
+INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace = sb-2k2osaevugje.servicebus.windows.net
+# MISSING: INTAKE_SERVICEBUS_NAMESPACE__credential = managedidentity
+# MISSING: INTAKE_SERVICEBUS_NAMESPACE__clientId   = 9d3dc21a-5180-4c31-aaed-5c98d6d01ace
+```
+`AZURE_CLIENT_ID` is set as a fallback but the Flex Consumption **scale controller** (the external component that monitors queue depth and triggers scale-out) runs outside the host process and may not inherit `AZURE_CLIENT_ID`. Without `__credential=managedidentity`, the scale controller cannot authenticate to Service Bus to detect pending messages and thus never schedules a `domain_event_dispatcher` instance.
+
+**Cause B — Flex Consumption function group isolation:**  
+The host log shows `"Function group target is function:outbox_dispatcher"` for all 4 functions when the timer fires. In Flex Consumption, timer/HTTP triggers and Service Bus triggers run in separate function groups. The warm instance created for the timer trigger does not consume SB messages. The SB group requires a separate scale event from the scale controller — which is blocked by Cause A.
+
+**Prior evidence (Section 28):** `domain_event_dispatcher` consumed 3 smoke messages at 21:57:22Z — those runs occurred before the `alwaysReady=null` change (Section 29) while instances were warm and already listening. Post-change, with 0 instances, the SB scale controller must initiate scale-out, revealing the credential gap.
+
+### 30.8 Actions Required (Owner: Trinity)
+
+| # | Action | Owner | Priority |
+|---|--------|-------|----------|
+| 1 | Add `INTAKE_SERVICEBUS_NAMESPACE__credential = managedidentity` app setting | Trinity | **HIGH — blocking** |
+| 2 | Add `INTAKE_SERVICEBUS_NAMESPACE__clientId = 9d3dc21a-5180-4c31-aaed-5c98d6d01ace` app setting | Trinity | **HIGH — blocking** |
+| 3 | After fix: re-run cold-scale probe from zero instances; record latency | Switch / Tank | HIGH |
+| 4 | Remove stale SB Data Sender + Data Receiver from worker UAI (explicit user approval required) | Tank | LOW |
+
+### 30.9 Section 30 Verdict
+
+| Gate | Result |
+|------|--------|
+| Config: alwaysReady=null, instanceMemoryMB=512 | ✅ PASS |
+| Function App Running, 4 functions registered | ✅ PASS |
+| All queues empty pre-probe | ✅ PASS |
+| No Owner/Contributor on runtime MIs | ✅ PASS |
+| Storage PNA Disabled, PE Approved, sharedKey=false | ✅ PASS |
+| Temp deployment runner absent | ✅ PASS |
+| Temp Data Sender role assigned, used, removed | ✅ PASS |
+| `domain_event_dispatcher` cold-scale trigger | ❌ FAIL — not triggered in 20-min window |
+| Cold-scale latency measured | ❌ BLOCKED — trigger did not fire |
+
+**Overall Section 30 verdict: ❌ FAIL**  
+Reason: `domain_event_dispatcher` Service Bus trigger did not consume the probe message from a cold (0-instance) state after 20+ minutes. Root cause: missing `INTAKE_SERVICEBUS_NAMESPACE__credential` and `__clientId` app settings prevent the Flex Consumption scale controller from authenticating to Service Bus. All infrastructure posture checks passed; the fault is a configuration gap in Function App settings, remediable by Trinity without IaC changes.
+
+**Probe message status:** `domain-events` queue has `activeMessageCount=1` at close of observation. Message will be consumed when Trinity applies the fix and re-deploys, or expire per queue TTL (14 days default). No DLQ pollution.
+
+---
+
+## Section 31 — Definitive Final Cold-Scale Probe (Switch, 2026-08-08T00:05–00:15 UTC)
+
+**Context:** Trinity applied the missing SB managed identity settings (`__credential=managedidentity`, `__clientId`) and restarted the Function host. This section is the definitive cold-scale verification.
+
+**Executed by:** Switch (Quality Engineer) — live Azure CLI + Python SDK session; no IaC/code edits.
+
+---
+
+### 31.1 Config Verification
+
+| Setting | Value | Result |
+|---------|-------|--------|
+| `INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace` | `sb-2k2osaevugje.servicebus.windows.net` | ✅ |
+| `INTAKE_SERVICEBUS_NAMESPACE__credential` | `managedidentity` | ✅ |
+| `INTAKE_SERVICEBUS_NAMESPACE__clientId` | `9d3dc21a-5180-4c31-aaed-5c98d6d01ace` | ✅ |
+| `AZURE_CLIENT_ID` | `9d3dc21a-5180-4c31-aaed-5c98d6d01ace` | ✅ |
+| `alwaysReady` | `null` (removed) | ✅ |
+| `instanceMemoryMB` | `512` | ✅ |
+| `maximumInstanceCount` | `100` | ✅ |
+| Function App state | `Running`, `httpsOnly=true` | ✅ |
+
+### 31.2 Pre-Probe Gate Checks
+
+| Check | Result |
+|-------|--------|
+| All 4 queues at 0 active / 0 DLQ | ✅ |
+| 4 functions registered, none disabled | ✅ `document_worker`, `domain_event_dispatcher`, `notification_worker`, `outbox_dispatcher` |
+| Storage `publicNetworkAccess=Disabled` | ✅ |
+| Storage `allowSharedKeyAccess=false` | ✅ |
+| Storage blob PE `st2k2osaevug.18dc6d94-…` = `Approved` | ✅ |
+| User had no pre-existing SB role | ✅ (empty role list) |
+| Worker UAI has no Owner/Contributor at RG level | ✅ (empty role list) |
+| Temp deployment runner absent | ✅ |
+
+### 31.3 Temporary Role / Probe
+
+| Step | Detail |
+|------|--------|
+| Temp role assigned | `Azure Service Bus Data Sender` → user OID `8bde9e45-7543-4aeb-a75f-12d724ea657e`; RA `465e88fc-3f36-4684-9912-70a0f9edf1c7` |
+| Probe sent | CorrelationId `switch-final-cold-scale-20260808-75b1fa2f-472d-4875-aab5-63e07ea1b84a`; sent 2026-08-07T23:07:41Z via `azure-servicebus` Python SDK + `DefaultAzureCredential` |
+| Temp role removed | 2026-08-07T23:08:04Z (23 s after send) |
+| User role confirmed absent | Empty role list post-removal ✅ |
+
+### 31.4 Cold-Scale Execution Evidence
+
+Queue polling confirmed `domain-events activeMessageCount=0` at **23:08:27Z** — **46 seconds** after message send.
+
+App Insights traces (ingested ~5 min post-execution):
+
+| Timestamp (UTC) | Event |
+|-----------------|-------|
+| `23:07:58` | Flex Consumption SB scale controller spun new instance; `"Function group target is function:domain_event_dispatcher"` ×4 |
+| `23:07:58` | Host cold-start: all 4 functions loaded (`ConsecutiveErrors=0`, `StartupCount=3`) |
+| `23:07:58` | `AutoCompleteMessages=True` override logged for `domain_event_dispatcher` |
+| `23:07:59` | `Executing 'Functions.domain_event_dispatcher'` (Reason=null, Id=`3cded683-f2f3-4b86-9326-6d0ffccf0e07`) |
+| `23:07:59` | `domain_event_dispatcher received message` |
+| `23:07:59` | `Executed 'Functions.domain_event_dispatcher' (Succeeded, …, Duration=31ms)` |
+
+**Cold-start breakdown:**
+- Message send → host initialized: **~17 s** (23:07:41 → 23:07:58)
+- Host initialized → function executed: **~1 s**
+- Send → queue at zero (poll): **46 s** (includes 5-s poll interval overhead)
+
+### 31.5 Post-Probe State
+
+| Check | Result |
+|-------|--------|
+| All 4 queues: active=0, DLQ=0 | ✅ |
+| App Insights exceptions (20-min window) | None ✅ |
+| Listener errors | None (SB listener stop/start at 23:12:29/23:13:38 is normal host recycle) ✅ |
+| Temp Data Sender role | Removed ✅ |
+| User has no remaining SB role | Confirmed ✅ |
+
+### 31.6 Residual Note
+
+Worker UAI (`id-intake-worker-dev`) retains stale `Azure Service Bus Data Sender` + `Azure Service Bus Data Receiver` alongside `Data Owner`. Redundant but harmless. Awaiting explicit user approval before removal (destructive operation).
+
+### 31.7 Section 31 Verdict
+
+| Gate | Result |
+|------|--------|
+| Config: alwaysReady=null, instanceMemoryMB=512 | ✅ PASS |
+| Complete SB MI binding (`__credential`, `__clientId`, `__fullyQualifiedNamespace`) | ✅ PASS |
+| Function App Running, 4 functions registered | ✅ PASS |
+| All queues empty pre-probe | ✅ PASS |
+| No Owner/Contributor on runtime MIs | ✅ PASS |
+| Storage PNA Disabled, PE Approved, sharedKey=false | ✅ PASS |
+| Temp deployment runner absent | ✅ PASS |
+| Temp Data Sender role assigned → used → removed | ✅ PASS |
+| `domain_event_dispatcher` cold-scale trigger fired | ✅ PASS |
+| No App Insights exceptions | ✅ PASS |
+| Queue returned to zero | ✅ PASS |
+| **Cold-scale latency (send → function executed)** | ✅ **~18 s** |
+
+**Overall Section 31 verdict: ✅ PASS**
+
+Cold-scale latency with `alwaysReady=null` and `instanceMemoryMB=512`: **~18 seconds** (message send → `domain_event_dispatcher` execution). Queue polled empty at 46 s (includes 5-s poll overhead). Zero exceptions. All infrastructure posture checks passed. Temp role lifecycle complete.
+
+
+---
+
+## Section 30 — Morpheus Cold-Scale Identity Fix: INTAKE_SERVICEBUS_NAMESPACE credential/clientId (2026-08-07T23:56–00:05 UTC)
+
+**Change:** Morpheus's approved IaC adds explicit INTAKE_SERVICEBUS_NAMESPACE__credential=managedidentity and INTAKE_SERVICEBUS_NAMESPACE__clientId app settings. These settings complete the identity-based connection configuration for the SB connection prefix, ensuring the Functions SB extension unambiguously selects the user-assigned identity (client ID 9d3dc21a-5180-4c31-aaed-5c98d6d01ace) for AMQP authentication — removing reliance on environment-level AZURE_CLIENT_ID fallback.
+
+**IaC applied as-is; no changes made to reviewed Bicep.**
+
+### Pre-Provision State
+- INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace ✅ already live
+- INTAKE_SERVICEBUS_NAMESPACE__credential ❌ absent
+- INTAKE_SERVICEBUS_NAMESPACE__clientId ❌ absent
+
+### What-If Summary
+
+unc-intake-dev → Modify (app settings array update + cosmetic siteConfig defaults). No destructive resource changes.
+
+### Provision Run
+- **Deployment ID:** dev-1786143584
+- **Duration:** 2m11s (23:58:16 → 00:02:26 UTC)
+- **Outcome:** SUCCESS ✅
+
+### Post-Provision Verification
+
+| Check | Value | Status |
+|-------|-------|--------|
+| INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace | sb-2k2osaevugje.servicebus.windows.net | ✅ |
+| INTAKE_SERVICEBUS_NAMESPACE__credential | managedidentity | ✅ |
+| INTAKE_SERVICEBUS_NAMESPACE__clientId | 9d3dc21a-5180-4c31-aaed-5c98d6d01ace | ✅ |
+| instanceMemoryMB | 512 (unchanged) | ✅ |
+| lwaysReady | null (unchanged) | ✅ |
+| Function App state | Running | ✅ |
+| 4 functions registered | document_worker, domain_event_dispatcher, notification_worker, outbox_dispatcher | ✅ |
+| Host started + 4 functions loaded | 2026-08-07T23:03:39Z | ✅ |
+| All queues | 0 active (untouched for Switch cold-scale probe) | ✅ |
+| Source package redeployed | No — not required | ✅ |
+| Stale Sender/Receiver roles | Left in place — awaiting user confirmation to remove | ✅ |
+
+**No commit made.** (No Tank-owned file changed; Bicep was already committed in a prior session.)
+
+---
+
+## Section 32 — Microsoft Foundry + Hosted Agent Deployment (Tank, 2026-08-08)
+
+### 32.1 Tooling and Capacity
+
+- `azd` upgraded from `1.28.1` to `1.30.0`.
+- Installed compatible extensions: `microsoft.foundry 1.0.0-beta.2`,
+  `azure.ai.agents 1.0.0-beta.9`, and `azure.ai.projects 1.0.0-beta.5`.
+- `Microsoft.MachineLearningServices` registered.
+- East US 2 Hosted Agent/private networking support confirmed dynamically.
+- Model quota confirmed before deployment. `gpt-5-nano` GlobalStandard quota was
+  `0/5000`; deployment capacity is `10`.
+
+### 32.2 Private Foundry Foundation
+
+| Resource | Live result |
+|----------|-------------|
+| Foundry account | `ais-intake-2k2osaev` — `Succeeded` |
+| Project | `aiproj-intake-dev` — `Succeeded` |
+| Project endpoint | `https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev` |
+| Selected model | `gpt-5-nano`, version `2025-08-07`, GlobalStandard capacity `10` — `Succeeded` |
+| Original compatibility probe model | `gpt-4.1-mini`, version `2025-04-14`, capacity `10` — retained but not used by the active agent |
+| Foundry public access | `Disabled` |
+| Local/key authentication | Disabled |
+| Private endpoint | `pe-ais-intake-2k2osaev-account` — `Approved` |
+| Foundry private DNS | `services.ai`, `cognitiveservices`, and `openai` zones linked to `vnet-intake-dev` |
+| Agent network injection | Dedicated delegated subnet `snet-foundry-agent` (`10.0.3.0/24`) |
+
+The current `Microsoft.CognitiveServices/accounts` + child project schema replaced
+the obsolete ML Hub/Workspace design. Storage, Cosmos DB, Search, and Key Vault
+remain private. Standard Service Bus remains on its public endpoint because private
+endpoints require Premium; local authentication is disabled and managed-identity
+RBAC remains enforced.
+
+### 32.3 Preview and Deployment
+
+- `azd provision --preview` completed successfully before foundation deployment.
+- A dedicated model what-if showed one `Create` for
+  `accounts/deployments/gpt-5-nano` and no destructive change.
+- `foundry-model-compat-20260808` deployed `gpt-5-nano` successfully.
+- Direct-code Hosted Agent deployment ran from an ephemeral VNet-integrated
+  Container Apps Job because the project rejects public data-plane access.
+- Private DNS inside the runner resolved the Foundry account to `10.0.1.11`.
+
+### 32.4 Hosted Agent Live State
+
+| Attribute | Value |
+|-----------|-------|
+| Name/version | `intake-agent:6` |
+| Status | `active` |
+| Runtime | Python `3.13`, direct code, remote dependency build |
+| Entry point | `python hosted_main.py` |
+| Protocol | Responses `2.0.0` |
+| Resources | `0.5` CPU / `1Gi` memory |
+| Model | `gpt-5-nano` |
+| Runtime principal | `7698b8bc-55ea-49b5-b2a8-ad06a16a1e9e` |
+| Responses endpoint | `https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev/agents/intake-agent/endpoint/protocols/openai/responses?api-version=v1` |
+| Playground | `https://ai.azure.com/nextgen/r/h-GnhYlrTrSiFEf2eZUTPg,rg-intake-dev,,ais-intake-2k2osaev,aiproj-intake-dev/build/agents/intake-agent/build?version=6` |
+
+Runtime RBAC was verified for Storage Blob Data Contributor, Cosmos DB built-in
+Data Contributor, Search Index Data Reader, Service Bus Data Sender, and Cognitive
+Services User.
+
+### 32.5 Live Invocation
+
+Execution `job-intake-foundry-deploy-2ym0y86` ran from
+`2026-08-08T16:38:49Z` to `16:40:10Z` and succeeded.
+
+- Session: `0a151b9042e69bed1cb26415f0bc402f543449ce7fa52a48f0bffaf08ddcc62`
+- Result: one `response.completed`, zero `response.failed`.
+- The response loaded `general-intake-v1`, reported revision `1`, no captured
+  fields, and `can_submit=false`, then asked the caller for explicit intake values.
+
+### 32.6 Evaluation
+
+- Configuration: `eval.yaml`; dataset:
+  `evaluation/dataset/foundry_smoke.jsonl` (five synthetic functional/security
+  cases); evaluators use current `builtin.*` identifiers.
+- Eval: `eval_0af9e3b25bdc4da8a122f5086bb37035`
+- Run: `evalrun_dea888681bcf483b89a5255ebcb7fa46`
+- Report:
+  `https://ai.azure.com/nextgen/r/h-GnhYlrTrSiFEf2eZUTPg,rg-intake-dev,,ais-intake-2k2osaev,aiproj-intake-dev/build/evaluations/eval_0af9e3b25bdc4da8a122f5086bb37035/run/evalrun_dea888681bcf483b89a5255ebcb7fa46`
+- Latest direct API status at `2026-08-08T17:54:56Z`: `in_progress`,
+  `total=0`, `passed=0`, `failed=0`, `report_url=null`, `error=null`.
+- A private in-VNet poller queried the run every minute for 20 additional minutes.
+  The service remained unchanged more than 54 minutes after creation, so this is
+  recorded as an external Foundry evaluation-service blocker rather than a pass.
+- `azd ai agent eval run` successfully created the run but the preview CLI could
+  not poll it because it attempted to unmarshal inline dataset `content` as an
+  object instead of a string. Direct authenticated API polling was used instead.
+
+### 32.7 Residual Blocker and Safety Posture
+
+The repository's Cosmos, Blob, and Service Bus persistence adapters still raise
+`NotImplementedError`. To verify the dev Hosted Agent live without altering domain
+implementation, version 6 explicitly uses non-production in-memory state with
+`INTAKE_ALLOW_EPHEMERAL_HOSTED_STATE=true`. Durable Azure data-plane RBAC is already
+assigned, but production persistence requires those adapters to be implemented.
+
+The existing Function App remains `Running`, exposes all four functions, and
+retains complete managed-identity Service Bus settings (`fullyQualifiedNamespace`,
+`credential=managedidentity`, and user-assigned `clientId`).
+
+### 32.8 Final Validation and Cleanup
+
+- `az bicep build --file infra/main.bicep` — succeeded with Bicep `0.46.1`.
+- `az deployment sub validate` with resolved dev parameters — `Succeeded`.
+- `python -m pytest -q` — `711 passed`.
+- Final ARM checks: Foundry account/model/private endpoint all `Succeeded`; private
+  endpoint connection `Approved`; Storage and Cosmos public access `Disabled` and
+  key/local authentication disabled; Search public access `Disabled` with AAD
+  bearer challenge; Standard Service Bus local authentication disabled.
+- The Function App remains `Running`; all four functions and complete Service Bus
+  managed-identity settings were re-verified.
+- Ephemeral deployment/evaluation jobs, runner-only Foundry RBAC assignments, and
+  local package/log/poller scratch artifacts were removed. Final count:
+  `temporaryJobs=0`, `runnerFoundryRoles=0`.
+
+### 32.9 Independent External-Shell Verification (Switch, 2026-08-08T18:05Z)
+
+Switch independently targeted `intake-agent:6` and the exact Responses endpoint
+from a separate agent shell. `azd ai agent show`, a fresh-session/fresh-conversation
+invoke, eval list, and fresh eval submission all returned HTTP 403:
+`Public access is disabled. Please configure private endpoint.` No independent eval
+or run ID was created. After the azd dev environment was corrected to
+`AZURE_AI_MODEL_DEPLOYMENT_NAME=gpt-5-nano`, both operations were retried and
+returned the same policy 403. Local evaluation gates remained `14 passed` with
+Ruff clean; the concurrent QE baseline was `709` full-suite passes. `eval.yaml`
+was verified against version `6` / `gpt-5-nano`.
+
+This is expected policy enforcement, not an agent-runtime regression: the Foundry
+account is private-only and the temporary VNet runner used for the successful live
+smoke was removed after verification. A second independent live data-plane check
+requires an approved in-VNet execution path; public access will not be enabled.
+
+### 32.10 Frozen Responses Source Redeployment (2026-08-08T18:28–18:47Z)
+
+- Redeployed Trinity's frozen root direct-code source through the approved
+  VNet-integrated Container Apps runner. Deployment succeeded as
+  `intake-agent:7`; status `active`; content hash
+  `7c6701bd65ed4adcdae1f5d4354bfbcf4e7b16e43969ae954bffdb54714af36a`.
+- Runtime contract: Python 3.13, `python hosted_main.py`, remote dependency build,
+  Responses `2.0.0`, `gpt-5-nano`, 0.5 CPU / 1Gi, explicit dev-only in-memory
+  persistence. Runtime principal remains
+  `7698b8bc-55ea-49b5-b2a8-ad06a16a1e9e`.
+- Active endpoint:
+  `https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev/agents/intake-agent/endpoint/protocols/openai/responses?api-version=v1`.
+- Fresh version-7 invocation succeeded. Session
+  `313ffe2dc19360c700UlN0mpdi9pK3Lu97g97B31trFiAMV74O`; conversation
+  `conv_786252aaa8a3f100006QyJfpYniPn4OPDxRgkh5rr5WSdTMYkp`; trace
+  `3b7d6bc903858d4b999c441e991f44b9`. The agent loaded
+  `general-intake-v1`, refused submission while `can_submit=false`, and requested
+  intake information.
+- Submitted evaluation `eval_40fb54424ad541729ae57d8974636f34`, run
+  `evalrun_0c775418dfa94ba8bc5d981cb31841d1`, named
+  `tank-live-acceptance-v7-20260808`. Latest private API status at
+  `2026-08-08T18:46:44Z`: `in_progress`, `total=0`, `passed=0`, `failed=0`,
+  `report_url=null`, `error=null`.
+- Published `AGENT_NAME`, `AGENT_ID`, `AGENT_VERSION`, `AGENT_ENDPOINT`,
+  `AGENT_GUID`, `AGENT_RUNTIME_PRINCIPAL_ID`, and `AGENT_PLAYGROUND_URL` into the
+  azd `dev` environment and sent them to Switch for independent verification.
+- Validation: targeted Hosted/eval tests `26 passed`; complete suite `711 passed`;
+  targeted evaluation/contract Ruff checks passed.
+- Ephemeral deployment/polling runner, local archives, and runner-only Foundry
+  role assignments were removed: `temporaryJobs=0`, `runnerFoundryRoles=0`.
+
+### 32.11 Final Asynchronous Evaluation Check (2026-08-08T18:52Z)
+
+A single final check from the private VNet path returned evaluation
+`eval_40fb54424ad541729ae57d8974636f34`, run
+`evalrun_0c775418dfa94ba8bc5d981cb31841d1`, status `in_progress`, with
+`total=0`, `passed=0`, `failed=0`, `report_url=null`, and `error=null`.
+No further polling was performed. The temporary check job and runner-only roles
+were removed (`temporaryJobs=0`, `runnerFoundryRoles=0`). The current published
+active deployment is `intake-agent:7` (version 6 was superseded by the requested
+frozen-source redeployment).
+
+### 32.12 Independent Version-7 QE Verification (Switch, 2026-08-08T18:56Z)
+
+Using the published `AGENT_*` values, Switch independently retried a fresh-session,
+fresh-conversation invocation and fresh eval `switch-independent-v7-20260808`.
+Both were rejected before creation with the expected private-boundary HTTP 403
+(`Public access is disabled. Please configure private endpoint.`); therefore no
+independent eval/run ID exists. Local version-7 gates remained `14 passed` with
+Ruff clean. `job-intake-eval-dev` is VNet-integrated but still uses its hello-world
+placeholder image; modifying it was correctly left outside QE scope. Independent
+functional verification remains blocked until an approved runner is preconfigured;
+private networking remains unchanged.
+
+---
+
+## Section 33 — Production-Durable Hosted Agent Preparation (2026-08-08)
+
+### 33.1 Live Inventory and Contract
+
+- Live Hosted Agent baseline: `intake-agent:7`, status `active`, runtime principal
+  `7698b8bc-55ea-49b5-b2a8-ad06a16a1e9e`.
+- Existing Cosmos `requests` uses immutable partition key `/tenantId`; Trinity's
+  durable transactional aggregate/outbox contract requires `/requestId`.
+- Existing Blob container `request-artifacts` matches the application contract.
+- Existing `domain-events` queue has duplicate detection disabled.
+- Storage, Cosmos, Search, and Foundry remain private-only. Standard Service Bus
+  remains public-endpoint/AAD-only because private endpoints require Premium.
+
+### 33.2 Non-Destructive Resource Plan
+
+- Retain legacy Cosmos containers and add:
+  `request-state` (`/requestId`), `templates` (`/templateId`), and
+  `idempotency` (`/scopeId`, item TTL enabled).
+- Retain `domain-events` and add `domain-events-durable` with duplicate detection
+  and a one-day detection window. Stable outbox item IDs are sent as MessageId.
+- Wire Hosted Agent and Functions to the new resources through explicit env vars.
+- Seed `general-intake-v1:1.0.0` idempotently from the approved private runner.
+- Scope Hosted runtime RBAC to Cosmos database `intake`, Blob container
+  `request-artifacts`, and queue `domain-events-durable`; retain Search Index Data
+  Reader and Cognitive Services User at their required service/account scopes.
+
+### 33.3 Prepared Files and Quality Gate
+
+- Updated `azure.yaml`, Cosmos/Service Bus/Functions Bicep, generated
+  `infra/main.json`, post-deploy verification scripts, worker Azure dependencies,
+  managed-identity RBAC script, and template seed script.
+- Trinity durable adapter handoff completed; the previous agent task is idle.
+- `python -m pytest -q`: `745 passed, 1 skipped` (live Azure test gated).
+- Ruff: passed. Targeted mypy: passed.
+- Bicep build: passed with Azure CLI Bicep `0.46.1`.
+- Prepared timestamp: `2026-08-08T19:30:10Z`.
+
+### 33.4 Production-Durability Validation Proof
+
+Validated on `2026-08-08` before deployment:
+
+| Check | Command | Result |
+|-------|---------|--------|
+| Full application suite | `python -m pytest -q` | ✅ `746 passed, 1 skipped`; only the opt-in live-Azure persistence test was skipped |
+| Lint | `python -m ruff check src tests evaluation scripts\azure\seed-default-template.py` | ✅ All checks passed |
+| Type checking | `python -m mypy src` | ✅ No issues in 34 source files |
+| Bicep build | `az bicep build --file infra\main.bicep --outfile infra\main.json` | ✅ Passed |
+| ARM validation | `az deployment sub validate ... location=eastus2 environmentName=dev` | ✅ `Succeeded` |
+| Azure preflight | `scripts\azure\preflight.ps1` | ✅ Passed with 0 errors; Bot Service warning is expected because that feature is disabled |
+| Provisioning preview | `azd provision --preview --no-prompt` | ✅ Passed; no deletes or public-networking relaxation |
+| Hosted package | `azd package intake-agent ... --no-prompt` | ✅ Direct-code package produced successfully |
+| Secret scan | Ripgrep over `azure.yaml`, `infra`, and `scripts\azure` | ✅ No key, connection-string, client-secret, password, or private-key patterns |
+| Static RBAC review | Bicep and `ensure-hosted-agent-rbac.ps1` | ✅ Data-plane roles only; Hosted runtime narrows Cosmos to database, Blob access to container, and Service Bus send to queue |
+
+`BlobArtifactStore.get_artifact_url` obtains a user-delegation key. The runtime
+therefore receives `Storage Blob Delegator` at storage-account scope in addition
+to `Storage Blob Data Contributor` at `request-artifacts` container scope. This is
+the least-privilege split required because delegation-key generation cannot be
+authorized at container scope.
+
+The final ARM what-if identified only additive durable resources and computed
+updates: three Cosmos containers and one Service Bus queue are created, with no
+resource deletions or destructive recreation. Existing containers, queues, private
+endpoints, public-access restrictions, and managed-identity-only authentication
+remain intact.
+
+### 33.5 Production-Durable Deployment Evidence
+
+Deployed and verified on `2026-08-08`:
+
+- ARM deployment `dev-1786218122` completed successfully in 2m59s.
+- Created non-destructively:
+  - Cosmos `request-state` (`/requestId`)
+  - Cosmos `templates` (`/templateId`)
+  - Cosmos `idempotency` (`/scopeId`, item TTL enabled)
+  - Service Bus `domain-events-durable` with duplicate detection and `P1D`
+    detection history
+- Existing `requests`, `revisions`, `workflow-events`, and `domain-events`
+  resources were retained without partition-key or queue recreation.
+- Seeded `general-intake-v1:1.0.0` idempotently from the approved
+  VNet-integrated Container Apps runner.
+
+Hosted Agent:
+
+| Attribute | Live value |
+|-----------|------------|
+| Active version | `intake-agent:8` |
+| Status | `active` |
+| Runtime principal | `7698b8bc-55ea-49b5-b2a8-ad06a16a1e9e` (unchanged from version 7) |
+| Responses endpoint | `https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev/agents/intake-agent/endpoint/protocols/openai/responses?api-version=v1` |
+| Playground | `https://ai.azure.com/nextgen/r/h-GnhYlrTrSiFEf2eZUTPg,rg-intake-dev,,ais-intake-2k2osaev,aiproj-intake-dev/build/agents/intake-agent/build?version=8` |
+
+The version-8 manifest contains no ephemeral-state override. Effective settings
+use `cosmos`, `azure` Blob, and `azure` Service Bus backends, with
+`request-state`, `templates`, `idempotency`, and `domain-events-durable`.
+
+Live Hosted runtime RBAC after legacy broad-role pruning:
+
+| Data plane | Role and scope |
+|------------|----------------|
+| Cosmos DB | Built-in Data Contributor on database `intake` |
+| Blob content | Storage Blob Data Contributor on container `request-artifacts` |
+| Blob delegated URLs | Storage Blob Delegator on storage account `st2k2osaevug` |
+| Service Bus | Data Sender on queue `domain-events-durable` |
+| Search | Search Index Data Reader on `srch-2k2osaevugje` |
+| Foundry inference | Cognitive Services User on `ais-intake-2k2osaev` |
+
+No account-scoped Cosmos contributor, storage-account Blob Data Contributor, or
+namespace-scoped Service Bus Sender remains on the Hosted runtime.
+
+Functions were rebuilt inside a Python 3.11 VNet runner so native dependencies
+match the FC1 runtime. The worker package includes `azure-cosmos`,
+`azure-servicebus`, `azure-identity`, `pydantic`, and `aiohttp`. Final live state:
+
+- Function App `func-intake-dev`: `Running`, HTTPS only.
+- Four functions registered: `document_worker`, `domain_event_dispatcher`,
+  `notification_worker`, and `outbox_dispatcher`.
+- Repeated timer executions after deployment succeeded.
+- `domain-events-durable`: `active=0`, `deadLetter=0`.
+
+Durability smoke:
+
+- Stable delegated user: `tank-user-1786222030`.
+- Conversation:
+  `conv_0c046a52a42f070e00vfd0vyiTlHiE3UTu9CqJqSqf9N4vhX6p`.
+- First invocation explicitly called `get_context`, `update_field`, and
+  `get_context`, persisting `project.name = "Durable Verification 1786222030"`.
+- A separate fresh-session invocation called `get_context` and returned the exact
+  same persisted value.
+- Cosmos proof: request `4907b8395d1e3e98e3d4eccf18bc6208`,
+  revision `2`, exact project name present in `request-state`.
+- Durable outbox proof: one outbox item reached `dispatched=true`; the
+  duplicate-detecting queue returned to zero with no dead-letter messages.
+
+Evaluation:
+
+- Eval: `eval_d3d6020eb8af478fa8a815b581173218`
+- Run: `evalrun_a816771f55a94be4a63139264a425db1`
+- Report:
+  `https://ai.azure.com/nextgen/r/h-GnhYlrTrSiFEf2eZUTPg,rg-intake-dev,,ais-intake-2k2osaev,aiproj-intake-dev/build/evaluations/eval_d3d6020eb8af478fa8a815b581173218/run/evalrun_a816771f55a94be4a63139264a425db1`
+- Single asynchronous status check: `in_progress`. No prolonged polling performed.
+
+Cleanup:
+
+- Temporary Foundry/worker Container Apps jobs removed.
+- Temporary Function Contributor and delegated-user impersonation assignments
+  removed.
+- Runner-only Foundry roles and the temporary custom role definition removed.
+- Local deployment archives and job definitions removed.
+- Final post-deploy verification: `9 passed, 0 failed`.
+- Final repository gate: `748 passed, 1 skipped`; Ruff and mypy passed.
+
+### 33.6 Independent Exact QE Live Gate
+
+At Switch's request, the corrected repository test
+`tests/azure/test_hosted_durable_persistence.py` was packaged from the current
+tree and run unchanged from an ephemeral VNet-integrated Container Apps Job
+against version 8. The first invocation omitted `--conversation-id`, parsed the
+server-returned `conv_*` identifier, and reused that identifier for both the
+same-session and fresh-session checks:
+
+```text
+INTAKE_RUN_AZURE_TESTS=1
+INTAKE_AGENT_ENDPOINT=https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev/agents/intake-agent/endpoint/protocols/openai/responses?api-version=v1
+python3 -m pytest tests/azure/test_hosted_durable_persistence.py -m azure -q -s
+```
+
+- Job execution: `job-intake-qe-durable-test-nrfu43d`
+- Execution: `2026-08-08T21:58:14Z`–`22:00:42Z`, `Succeeded`
+- Raw pytest outcome: `1 passed, 2 warnings in 72.47s (0:01:12)`
+- Persisted value: `Durable Verification 4a661e4f6f57`
+- Conversation:
+  `conv_97e9f353b34d89a400iTjUpG41541bq5RBzqV1H3YrsocVx65D`
+- Session:
+  `8639253cd3eb10156fed2965a9ccbf4b602a353655feafa85b063f8a75e1fb0`
+- The write, same-session resume, and fresh-session resume all returned the exact
+  persisted project name.
+
+The job, temporary Foundry Agent Consumer assignment, temporary delegated-user
+impersonation assignment/custom role, and local job artifacts were removed after
+the run. Networking was not changed.

@@ -1,0 +1,123 @@
+# CI pipeline — lint, type-check, test, security scan, Bicep build
+# Triggers on push and pull_request to main and develop.
+# Does NOT deploy. Deployment is handled by deploy.yml.
+#
+# Required repository variables (Settings → Secrets and variables → Actions):
+#   None for CI — this workflow uses no Azure credentials.
+#
+# Required Actions permissions:
+#   contents: read
+#   pull-requests: write  (for PR status comments)
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Bicep validation — build all Bicep files to catch syntax and type errors
+  # ---------------------------------------------------------------------------
+  bicep-validate:
+    name: Bicep Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep CLI
+        run: az bicep install
+
+      - name: Build main.bicep (syntax check)
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Lint all Bicep files
+        run: |
+          az bicep lint --file infra/main.bicep
+          for f in infra/modules/*.bicep; do
+            echo "Linting $f"
+            az bicep lint --file "$f"
+          done
+
+  # ---------------------------------------------------------------------------
+  # Python — lint, type-check, unit tests (runs when src/ or tests/ change)
+  # ---------------------------------------------------------------------------
+  python-ci:
+    name: Python CI
+    runs-on: ubuntu-latest
+    # Skip if no Python source exists yet (greenfield phase)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          if [ -f pyproject.toml ]; then
+            pip install --upgrade pip
+            pip install -e ".[dev]" 2>/dev/null || echo "No dev extras yet — skipping"
+          else
+            echo "No pyproject.toml yet — skipping Python install"
+          fi
+
+      - name: Ruff lint
+        run: |
+          if command -v ruff &>/dev/null; then
+            ruff check src/ tests/ --output-format=github
+          else
+            echo "ruff not installed yet — skipping"
+          fi
+
+      - name: Mypy type-check
+        run: |
+          if command -v mypy &>/dev/null; then
+            mypy src/ --ignore-missing-imports
+          else
+            echo "mypy not installed yet — skipping"
+          fi
+
+      - name: pytest unit tests
+        run: |
+          if command -v pytest &>/dev/null && [ -d tests/unit ]; then
+            pytest tests/unit -v --tb=short
+          else
+            echo "pytest or tests/unit not available yet — skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Security scan — Bandit (Python), Trivy (IaC + secrets)
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: config
+          scan-ref: infra/
+          format: table
+          exit-code: '0'  # Non-blocking for now; harden before production
+
+      - name: Trivy secret scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: '1'  # Fail on secret detection

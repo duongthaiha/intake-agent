@@ -39,7 +39,7 @@ resource searchService 'Microsoft.Search/searchServices@2023-11-01' = {
     disableLocalAuth: false
     authOptions: {
       aadOrApiKey: {
-        aadAuthFailureMode: 'http403'
+        aadAuthFailureMode: 'http401WithBearerChallenge'
       }
     }
     semanticSearch: 'disabled'

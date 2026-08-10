@@ -19,7 +19,7 @@ param location string
 @description('Object ID of the identity running the deployment (for KV access policy during bootstrap).')
 param principalId string = ''
 
-@description('Deploy Azure AI Foundry hub, project and AI Services account. Requires Microsoft.MachineLearningServices provider to be registered.')
+@description('Deploy a private Microsoft Foundry account, project, model and Standard Agent capability host.')
 param deployFoundry bool = false
 
 @description('Deploy Azure Bot Service resource. Requires Microsoft.BotService provider registered + Teams publishing spike resolved.')
@@ -104,7 +104,6 @@ module network 'modules/network.bicep' = {
     deployStoragePrivateEndpoint: deployStoragePrivateEndpoint
     cosmosAccountName: cosmosAccountName
     storageAccountName: storageAccountName
-    serviceBusNamespaceName: serviceBusName
     searchServiceName: searchServiceName
     keyVaultName: keyVaultName
   }
@@ -156,7 +155,6 @@ module storage 'modules/storage.bicep' = {
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
     evalIdentityPrincipalId: identity.outputs.evalIdentityPrincipalId
     functionsMIPrincipalId: identity.outputs.workerIdentityPrincipalId
-    deployerPrincipalId: principalId
     functionsSubnetId: functionsSubnetId
   }
   dependsOn: [network]
@@ -189,8 +187,7 @@ module servicebus 'modules/servicebus.bicep' = {
   params: {
     location: location
     tags: tags
-    namespaceName: 'sb-${take(resourceToken, 12)}'
-    deployPrivateEndpoints: deployPrivateEndpoints
+    namespaceName: serviceBusName
     agentIdentityPrincipalId: identity.outputs.agentIdentityPrincipalId
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
   }
@@ -230,6 +227,9 @@ module functions 'modules/functions.bicep' = {
     workerIdentityClientId: identity.outputs.workerIdentityClientId
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabase: cosmos.outputs.databaseName
+    cosmosRequestsContainer: cosmos.outputs.requestsContainerName
+    cosmosTemplatesContainer: cosmos.outputs.templatesContainerName
+    cosmosIdempotencyContainer: cosmos.outputs.idempotencyContainerName
     serviceBusNamespace: servicebus.outputs.namespaceFqdn
     serviceBusQueue: servicebus.outputs.queueName
     blobEndpoint: storage.outputs.blobEndpoint
@@ -274,14 +274,42 @@ module foundry 'modules/foundry.bicep' = if (deployFoundry) {
   params: {
     location: location
     tags: tags
-    hubName: 'aihub-intake-${environmentName}'
+    accountName: 'ais-intake-${take(resourceToken, 8)}'
     projectName: 'aiproj-intake-${environmentName}'
-    aiServicesName: 'ais-intake-${environmentName}'
+    modelDeploymentName: 'gpt-5-nano'
+    modelName: 'gpt-5-nano'
+    modelVersion: '2025-08-07'
+    modelFormat: 'OpenAI'
+    modelSkuName: 'GlobalStandard'
+    modelCapacity: 10
+    storageAccountName: storage.outputs.accountName
     storageAccountId: storage.outputs.accountId
-    keyVaultId: keyvault.outputs.vaultId
-    appInsightsId: monitoring.outputs.appInsightsId
-    agentIdentityId: identity.outputs.agentIdentityId
-    agentIdentityPrincipalId: identity.outputs.agentIdentityPrincipalId
+    storageBlobEndpoint: storage.outputs.blobEndpoint
+    cosmosAccountName: cosmos.outputs.accountName
+    cosmosAccountId: cosmos.outputs.accountId
+    cosmosEndpoint: cosmos.outputs.endpoint
+    searchServiceName: search.outputs.serviceName
+    searchServiceId: search.outputs.serviceId
+    searchEndpoint: search.outputs.endpoint
+    agentSubnetId: network.outputs.foundryAgentSubnetId
+    deployerPrincipalId: principalId
+  }
+}
+
+module foundryPrivateEndpoint 'modules/foundry-private-endpoint.bicep' = if (deployFoundry) {
+  scope: rg
+  name: 'foundryPrivateEndpoint'
+  params: {
+    location: location
+    tags: tags
+    accountName: foundry!.outputs.accountName
+    accountId: foundry!.outputs.accountId
+    privateEndpointSubnetId: network.outputs.peSubnetId
+    foundryPrivateDnsZoneIds: [
+      network.outputs.foundryServicesPrivateDnsZoneId
+      network.outputs.foundryOpenAiPrivateDnsZoneId
+      network.outputs.foundryCognitiveServicesPrivateDnsZoneId
+    ]
   }
 }
 
@@ -309,6 +337,9 @@ output AZURE_RESOURCE_GROUP string = rg.name
 output AZURE_COSMOS_ENDPOINT string = cosmos.outputs.endpoint
 output AZURE_COSMOS_DATABASE string = cosmos.outputs.databaseName
 output AZURE_COSMOS_ACCOUNT_NAME string = cosmos.outputs.accountName
+output AZURE_COSMOS_REQUESTS_CONTAINER string = cosmos.outputs.requestsContainerName
+output AZURE_COSMOS_TEMPLATES_CONTAINER string = cosmos.outputs.templatesContainerName
+output AZURE_COSMOS_IDEMPOTENCY_CONTAINER string = cosmos.outputs.idempotencyContainerName
 
 output AZURE_SERVICEBUS_NAMESPACE string = servicebus.outputs.namespaceFqdn
 output AZURE_SERVICEBUS_QUEUE string = servicebus.outputs.queueName
@@ -333,8 +364,20 @@ output WORKER_IDENTITY_CLIENT_ID string = identity.outputs.workerIdentityClientI
 output EVAL_IDENTITY_CLIENT_ID string = identity.outputs.evalIdentityClientId
 
 #disable-next-line BCP318
-output AZURE_FOUNDRY_HUB_NAME string = deployFoundry ? foundry.outputs.hubName : ''
+output AZURE_FOUNDRY_HUB_NAME string = deployFoundry ? foundry.outputs.accountName : ''
 #disable-next-line BCP318
 output AZURE_FOUNDRY_PROJECT_NAME string = deployFoundry ? foundry.outputs.projectName : ''
 #disable-next-line BCP318
-output AZURE_AI_SERVICES_ENDPOINT string = deployFoundry ? foundry.outputs.aiServicesEndpoint : ''
+output AZURE_AI_SERVICES_ENDPOINT string = deployFoundry ? foundry.outputs.accountEndpoint : ''
+#disable-next-line BCP318
+output AZURE_AI_ACCOUNT_NAME string = deployFoundry ? foundry.outputs.accountName : ''
+#disable-next-line BCP318
+output AZURE_AI_PROJECT_NAME string = deployFoundry ? foundry.outputs.projectName : ''
+#disable-next-line BCP318
+output AZURE_AI_PROJECT_ID string = deployFoundry ? foundry.outputs.projectId : ''
+#disable-next-line BCP318
+output AZURE_AI_PROJECT_ENDPOINT string = deployFoundry ? foundry.outputs.projectEndpoint : ''
+#disable-next-line BCP318
+output FOUNDRY_PROJECT_ENDPOINT string = deployFoundry ? foundry.outputs.projectEndpoint : ''
+#disable-next-line BCP318
+output AZURE_AI_MODEL_DEPLOYMENT_NAME string = deployFoundry ? foundry.outputs.modelDeploymentName : ''

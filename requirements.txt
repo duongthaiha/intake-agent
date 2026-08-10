@@ -1,0 +1,2 @@
+# Foundry direct-code remote build installs the workspace and its dependencies.
+.

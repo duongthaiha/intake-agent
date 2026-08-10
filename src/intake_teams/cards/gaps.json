@@ -1,0 +1,129 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "speak": "Gaps review. Your request has ${gap_count} items that need attention before it can be submitted. Review each gap below.",
+  "body": [
+    {
+      "type": "Container",
+      "style": "attention",
+      "bleed": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "⚠️ Gaps to Resolve",
+          "weight": "Bolder",
+          "size": "Medium",
+          "wrap": true,
+          "id": "heading"
+        },
+        {
+          "type": "TextBlock",
+          "text": "Request: **${request_title}** — Revision ${current_revision}",
+          "wrap": true,
+          "spacing": "Small",
+          "id": "context"
+        }
+      ]
+    },
+    {
+      "type": "TextBlock",
+      "text": "${blocking_count} blocking gap(s) must be resolved before you can submit. ${warning_count} warning gap(s) can be acknowledged.",
+      "wrap": true,
+      "spacing": "Medium",
+      "id": "summary"
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "id": "blocking_gaps",
+      "isVisible": "${has_blocking_gaps}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "🔴 Blocking Gaps",
+          "weight": "Bolder",
+          "color": "Attention",
+          "wrap": true,
+          "id": "lbl_blocking"
+        },
+        {
+          "type": "ColumnSet",
+          "id": "blocking_gap_list",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${blocking_gaps_text}",
+                  "wrap": true,
+                  "spacing": "Small"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "id": "warning_gaps",
+      "isVisible": "${has_warning_gaps}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "🟡 Warning Gaps",
+          "weight": "Bolder",
+          "color": "Warning",
+          "wrap": true,
+          "id": "lbl_warning"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${warning_gaps_text}",
+          "wrap": true,
+          "spacing": "Small"
+        },
+        {
+          "type": "Input.Toggle",
+          "id": "acknowledge_warnings",
+          "title": "I acknowledge these warnings and wish to proceed",
+          "label": "Acknowledge all warning gaps",
+          "valueOn": "true",
+          "valueOff": "false"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Address Blocking Gaps",
+      "verb": "capture_field",
+      "data": {
+        "field_path": "${first_blocking_gap_field}",
+        "expected_revision": "${current_revision}"
+      },
+      "tooltip": "Go to the first blocking gap and provide a value",
+      "style": "positive",
+      "isVisible": "${has_blocking_gaps}",
+      "id": "btn_address"
+    },
+    {
+      "type": "Action.Execute",
+      "title": "Acknowledge Warnings and Continue",
+      "verb": "acknowledge_gaps",
+      "associatedInputs": "auto",
+      "data": {
+        "gap_ids": "${warning_gap_ids}",
+        "expected_revision": "${current_revision}"
+      },
+      "tooltip": "Accept the listed warnings and continue to submission",
+      "isVisible": "${can_acknowledge_only}",
+      "id": "btn_acknowledge"
+    }
+  ]
+}

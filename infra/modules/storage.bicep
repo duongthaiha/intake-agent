@@ -8,8 +8,6 @@ param deployPrivateEndpoints bool
 param workerIdentityPrincipalId string
 param evalIdentityPrincipalId string
 param functionsMIPrincipalId string
-@description('Principal ID of the deploying identity — needs Storage Blob Data Contributor to upload deployment packages.')
-param deployerPrincipalId string = ''
 @description('VNet subnet ID for Functions service endpoint (allows Flex Consumption Legion to access storage when publicNetworkAccess=Disabled).')
 param functionsSubnetId string = ''
 
@@ -30,7 +28,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
     allowBlobPublicAccess: false
-    allowSharedKeyAccess: true  // Required by Functions Flex Consumption deployment storage
+    allowSharedKeyAccess: false
     publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
     networkAcls: deployPrivateEndpoints ? {
       defaultAction: 'Deny'

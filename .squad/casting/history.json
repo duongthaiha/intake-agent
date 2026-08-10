@@ -1,0 +1,22 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "The Matrix",
+      "project": "intake-agent",
+      "assigned_at": "2026-08-07T16:08:46.135+01:00",
+      "agents": ["Morpheus", "Trinity", "Neo", "Tank", "Switch"]
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "intake-agent": {
+      "universe": "The Matrix",
+      "cast": {
+        "morpheus": "Lead Architect",
+        "trinity": "AI/Backend Engineer",
+        "neo": "Teams/Experience Engineer",
+        "tank": "Azure Platform & Security Engineer",
+        "switch": "Quality Engineer"
+      }
+    }
+  }
+}

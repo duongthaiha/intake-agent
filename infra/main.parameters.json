@@ -12,13 +12,13 @@
       "value": "${AZURE_PRINCIPAL_ID}"
     },
     "deployFoundry": {
-      "value": false
+      "value": true
     },
     "deployBotService": {
       "value": false
     },
     "deployPrivateEndpoints": {
-      "value": false
+      "value": true
     },
     "deployStoragePrivateEndpoint": {
       "value": true

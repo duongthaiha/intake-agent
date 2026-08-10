@@ -1,34 +1,45 @@
-// Azure AI Foundry module — Hub, Project, and AI Services account
-//
-// ⚠️  GATED — deployFoundry must be true in main.bicep parameters.
-// ⚠️  REQUIRES Microsoft.MachineLearningServices provider registration.
-// ⚠️  Hosted Agent model deployment is NOT included here:
-//      - Model selection and TPM quota must be confirmed before deploying.
-//      - Use the Foundry portal or CLI to create model deployments after provisioning.
-//      - Gate model-deployment Bicep behind a separate parameter once model/quota is confirmed.
-//
-// References:
-//   ARM/Bicep: https://learn.microsoft.com/azure/templates/microsoft.machinelearningservices/workspaces
-//   Quickstart: https://github.com/Azure/azure-quickstart-templates/tree/master/quickstarts/microsoft.machinelearningservices/aifoundry-basics
+// Microsoft Foundry — private Standard Agent setup using existing project data services.
+// Current Foundry resources are Cognitive Services AIServices accounts/projects.
 targetScope = 'resourceGroup'
 
 param location string
 param tags object
-param hubName string
+param accountName string
 param projectName string
-param aiServicesName string
+param modelDeploymentName string
+param modelName string
+param modelVersion string
+param modelFormat string = 'OpenAI'
+param modelSkuName string = 'GlobalStandard'
+param modelCapacity int = 10
+
+param storageAccountName string
 param storageAccountId string
-param keyVaultId string
-param appInsightsId string
-param agentIdentityId string
-param agentIdentityPrincipalId string
+param storageBlobEndpoint string
+param cosmosAccountName string
+param cosmosAccountId string
+param cosmosEndpoint string
+param searchServiceName string
+param searchServiceId string
+param searchEndpoint string
 
-// ---------------------------------------------------------------------------
-// AI Services account (multi-model, kind: AIServices)
-// ---------------------------------------------------------------------------
+param agentSubnetId string
+param deployerPrincipalId string = ''
 
-resource aiServices 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
-  name: aiServicesName
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: storageAccountName
+}
+
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
+  name: cosmosAccountName
+}
+
+resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
+  name: searchServiceName
+}
+
+resource foundryAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
+  name: accountName
   location: location
   tags: tags
   kind: 'AIServices'
@@ -39,121 +50,218 @@ resource aiServices 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
     type: 'SystemAssigned'
   }
   properties: {
-    customSubDomainName: aiServicesName
-    publicNetworkAccess: 'Enabled'
-    disableLocalAuth: false
+    allowProjectManagement: true
+    customSubDomainName: accountName
+    disableLocalAuth: true
+    publicNetworkAccess: 'Disabled'
     networkAcls: {
-      defaultAction: 'Allow'
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
       ipRules: []
+      virtualNetworkRules: []
     }
+    networkInjections: [
+      {
+        scenario: 'agent'
+        subnetArmId: agentSubnetId
+        useMicrosoftManagedNetwork: false
+      }
+    ]
   }
 }
 
-// ---------------------------------------------------------------------------
-// Foundry Hub (kind: Hub)
-// Links storage, Key Vault, App Insights, and AI Services as connections.
-// ---------------------------------------------------------------------------
-
-resource foundryHub 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
-  name: hubName
-  location: location
-  tags: tags
-  kind: 'Hub'
-  identity: {
-    type: 'SystemAssigned'
-  }
+resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: foundryAccount
+  name: modelDeploymentName
   sku: {
-    name: 'Basic'
-    tier: 'Basic'
+    name: modelSkuName
+    capacity: modelCapacity
   }
   properties: {
-    storageAccount: storageAccountId
-    keyVault: keyVaultId
-    applicationInsights: appInsightsId
-    hbiWorkspace: false
-    publicNetworkAccess: 'Enabled'
-  }
-}
-
-// AI Services connection on the hub
-resource hubAiServicesConnection 'Microsoft.MachineLearningServices/workspaces/connections@2024-10-01' = {
-  parent: foundryHub
-  name: 'aiservices-connection'
-  properties: {
-    category: 'AIServices'
-    target: aiServices.properties.endpoint
-    authType: 'AAD'
-    isSharedToAll: true
-    metadata: {
-      ApiType: 'Azure'
-      ResourceId: aiServices.id
+    model: {
+      format: modelFormat
+      name: modelName
+      version: modelVersion
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Foundry Project (kind: Project, child of Hub)
-// ---------------------------------------------------------------------------
-
-resource foundryProject 'Microsoft.MachineLearningServices/workspaces@2024-10-01' = {
+resource foundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
+  parent: foundryAccount
   name: projectName
   location: location
   tags: tags
-  kind: 'Project'
   identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${agentIdentityId}': {}
+    type: 'SystemAssigned'
+  }
+  properties: {
+    displayName: 'Intake Agent'
+    description: 'Private Microsoft Foundry project for the intake-agent hosted agent.'
+  }
+  dependsOn: [
+    modelDeployment
+  ]
+}
+
+resource cosmosConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
+  parent: foundryProject
+  name: cosmosAccountName
+  properties: {
+    category: 'CosmosDB'
+    target: cosmosEndpoint
+    authType: 'AAD'
+    metadata: {
+      ApiType: 'Azure'
+      ResourceId: cosmosAccountId
+      location: cosmosAccount.location
     }
   }
-  sku: {
-    name: 'Basic'
-    tier: 'Basic'
-  }
+}
+
+resource storageConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
+  parent: foundryProject
+  name: storageAccountName
   properties: {
-    hubResourceId: foundryHub.id
-    publicNetworkAccess: 'Enabled'
+    category: 'AzureStorageAccount'
+    target: storageBlobEndpoint
+    authType: 'AAD'
+    metadata: {
+      ApiType: 'Azure'
+      ResourceId: storageAccountId
+      location: storageAccount.location
+    }
   }
 }
 
-// ---------------------------------------------------------------------------
-// RBAC — Foundry roles for agent managed identity
-// ---------------------------------------------------------------------------
+resource searchConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
+  parent: foundryProject
+  name: searchServiceName
+  properties: {
+    category: 'CognitiveSearch'
+    target: searchEndpoint
+    authType: 'AAD'
+    metadata: {
+      ApiType: 'Azure'
+      ResourceId: searchServiceId
+      location: searchService.location
+    }
+  }
+}
 
-// Azure AI Developer role on the project (allows agent management + invocation)
-var aiDeveloperRoleId = '64702f94-c441-49e6-a78b-ef80e0188fee'
+var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+var storageBlobDataOwnerRoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
+var cosmosDbOperatorRoleId = '230815da-be43-4aae-9cb4-875f7bd000aa'
+var searchIndexDataContributorRoleId = '8ebe5a00-799e-43f5-93ac-243d3dce84a7'
+var searchServiceContributorRoleId = '7ca78c08-252a-4471-8644-bb5ff32d4ba0'
+var foundryUserRoleId = '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 
-resource agentAiDeveloper 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(foundryProject.id, agentIdentityPrincipalId, aiDeveloperRoleId)
+resource projectStorageContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, foundryProject.id, storageBlobDataContributorRoleId)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalId: foundryProject.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource projectCosmosOperator 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(cosmosAccount.id, foundryProject.id, cosmosDbOperatorRoleId)
+  scope: cosmosAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cosmosDbOperatorRoleId)
+    principalId: foundryProject.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource projectSearchIndexContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(searchService.id, foundryProject.id, searchIndexDataContributorRoleId)
+  scope: searchService
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchIndexDataContributorRoleId)
+    principalId: foundryProject.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource projectSearchServiceContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(searchService.id, foundryProject.id, searchServiceContributorRoleId)
+  scope: searchService
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', searchServiceContributorRoleId)
+    principalId: foundryProject.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deployerFoundryUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  name: guid(foundryProject.id, deployerPrincipalId, foundryUserRoleId)
   scope: foundryProject
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', aiDeveloperRoleId)
-    principalId: agentIdentityPrincipalId
-    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', foundryUserRoleId)
+    principalId: deployerPrincipalId
+    principalType: 'User'
   }
 }
 
-// Cognitive Services OpenAI User (model invocation)
-var cogServicesUserRoleId = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
-
-resource agentCogServicesUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiServices.id, agentIdentityPrincipalId, cogServicesUserRoleId)
-  scope: aiServices
+resource projectCapabilityHost 'Microsoft.CognitiveServices/accounts/projects/capabilityHosts@2025-06-01' = {
+  parent: foundryProject
+  name: 'agents'
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cogServicesUserRoleId)
-    principalId: agentIdentityPrincipalId
-    principalType: 'ServicePrincipal'
+    #disable-next-line BCP037
+    capabilityHostKind: 'Agents'
+    storageConnections: [
+      storageConnection.name
+    ]
+    threadStorageConnections: [
+      cosmosConnection.name
+    ]
+    vectorStoreConnections: [
+      searchConnection.name
+    ]
   }
+  dependsOn: [
+    projectStorageContributor
+    projectCosmosOperator
+    projectSearchIndexContributor
+    projectSearchServiceContributor
+  ]
 }
 
-// ---------------------------------------------------------------------------
-// Outputs
-// ---------------------------------------------------------------------------
+resource projectStorageOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, foundryProject.id, storageBlobDataOwnerRoleId)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataOwnerRoleId)
+    principalId: foundryProject.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+  dependsOn: [
+    projectCapabilityHost
+  ]
+}
 
-output hubId string = foundryHub.id
-output hubName string = foundryHub.name
+var cosmosDataContributorRoleDefinitionId = '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
+
+resource projectCosmosDataContributor 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: cosmosAccount
+  name: guid(cosmosAccount.id, foundryProject.id, 'enterprise-memory')
+  properties: {
+    roleDefinitionId: cosmosDataContributorRoleDefinitionId
+    principalId: foundryProject.identity.principalId
+    scope: '${cosmosAccount.id}/dbs/enterprise_memory'
+  }
+  dependsOn: [
+    projectCapabilityHost
+  ]
+}
+
+output accountId string = foundryAccount.id
+output accountName string = foundryAccount.name
+output accountEndpoint string = foundryAccount.properties.endpoint
 output projectId string = foundryProject.id
 output projectName string = foundryProject.name
-output aiServicesId string = aiServices.id
-output aiServicesName string = aiServices.name
-output aiServicesEndpoint string = aiServices.properties.endpoint
+output projectEndpoint string = 'https://${foundryAccount.name}.services.ai.azure.com/api/projects/${foundryProject.name}'
+output projectPrincipalId string = foundryProject.identity.principalId
+output modelDeploymentName string = modelDeployment.name

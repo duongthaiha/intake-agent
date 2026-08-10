@@ -1,0 +1,125 @@
+# Deployment pipeline — azd provision + deploy
+# Uses workload identity federation (no stored credentials).
+#
+# Required GitHub repository configuration (Settings → Secrets and variables → Actions):
+#
+#   Variables (non-secret):
+#     AZURE_CLIENT_ID        — Application (client) ID of the federated service principal
+#     AZURE_TENANT_ID        — Azure AD tenant ID: c214aaa8-7a43-441a-b501-f942c96f54a8
+#     AZURE_SUBSCRIPTION_ID  — Target subscription: 87e1a785-896b-4eb4-a214-47f67995133e
+#     AZURE_ENV_NAME         — azd environment name (e.g. dev, test, prod)
+#     AZURE_LOCATION         — Azure region (e.g. eastus2)
+#
+#   Secrets:
+#     (none — all authentication uses workload identity federation)
+#
+# Required Azure setup (one-time, performed by Tank or the deploying engineer):
+#   1. Create an Entra app registration for GitHub Actions (or reuse an existing SPN).
+#   2. Add a federated credential:
+#      - Issuer: https://token.actions.githubusercontent.com
+#      - Subject: repo:<org>/<repo>:environment:dev
+#        (or repo:<org>/<repo>:ref:refs/heads/main for branch-scoped)
+#   3. Assign the SPN: Contributor + User Access Administrator on the target resource group
+#      (or Owner at the resource group level).
+#   4. Set AZURE_CLIENT_ID in GitHub Actions Variables.
+#
+# Trigger: push to main, or manual dispatch.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev / test / prod)'
+        required: true
+        default: dev
+        type: choice
+        options: [dev, test, prod]
+      deployFoundry:
+        description: 'Deploy Foundry hub/project (requires provider registration)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+
+permissions:
+  id-token: write   # Required for OIDC token exchange
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel in-progress deploys
+
+jobs:
+  deploy:
+    name: azd provision + deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install azd
+      - name: Install Azure Developer CLI
+        uses: Azure/setup-azd@v1
+
+      # Log in using workload identity federation — no secrets stored
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Authenticate azd with the already-established Az CLI token
+      - name: azd auth (federated)
+        run: azd auth login --federated-credential-provider github
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Refresh environment from last known state (no .env files in repo)
+      - name: Set azd environment
+        run: |
+          azd env new "${{ vars.AZURE_ENV_NAME }}" --no-prompt || azd env select "${{ vars.AZURE_ENV_NAME }}"
+          azd env set AZURE_LOCATION "${{ vars.AZURE_LOCATION }}"
+          azd env set AZURE_SUBSCRIPTION_ID "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          azd env set DEPLOY_FOUNDRY "${{ github.event.inputs.deployFoundry || 'false' }}"
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+
+      # What-if before provisioning (non-blocking, artefact attached)
+      - name: Bicep what-if
+        run: |
+          bash scripts/azure/what-if.sh "${{ vars.AZURE_ENV_NAME }}" "${{ vars.AZURE_LOCATION }}" || true
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+
+      # Provision infrastructure
+      - name: azd provision
+        run: azd provision --no-prompt
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_PRINCIPAL_ID: ${{ vars.AZURE_PRINCIPAL_ID || '' }}
+
+      # Deploy application code (Functions, Container Apps job image)
+      - name: azd deploy
+        run: azd deploy --no-prompt
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Post-deploy verification
+      - name: Post-deploy verification
+        run: bash scripts/azure/post-deploy-verify.sh
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        continue-on-error: true

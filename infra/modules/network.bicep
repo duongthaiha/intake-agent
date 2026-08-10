@@ -13,7 +13,6 @@ param deployStoragePrivateEndpoint bool = false
 // Resource names of data services (used for private endpoint creation)
 param cosmosAccountName string
 param storageAccountName string
-param serviceBusNamespaceName string
 param searchServiceName string
 param keyVaultName string
 
@@ -62,6 +61,21 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
         }
       }
       {
+        name: 'snet-foundry-agent'
+        properties: {
+          addressPrefix: '10.0.3.0/24'
+          privateEndpointNetworkPolicies: 'Enabled'
+          delegations: [
+            {
+              name: 'Microsoft.App.environments'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
+        }
+      }
+      {
         name: 'snet-container-apps'
         properties: {
           addressPrefix: '10.0.4.0/23'
@@ -83,6 +97,7 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
 // Convenience references to subnets
 var peSubnetId = '${vnet.id}/subnets/snet-private-endpoints'
 var functionsSubnetId = '${vnet.id}/subnets/snet-functions'
+var foundryAgentSubnetId = '${vnet.id}/subnets/snet-foundry-agent'
 var containerAppsSubnetId = '${vnet.id}/subnets/snet-container-apps'
 
 // ---------------------------------------------------------------------------
@@ -95,6 +110,9 @@ var dnsZones = [
   'privatelink.servicebus.windows.net'
   'privatelink.search.windows.net'
   'privatelink.vaultcore.azure.net'
+  'privatelink.services.ai.azure.com'
+  'privatelink.openai.azure.com'
+  'privatelink.cognitiveservices.azure.com'
 ]
 
 resource privateDnsZones 'Microsoft.Network/privateDnsZones@2020-06-01' = [for zone in dnsZones: {
@@ -125,10 +143,6 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existi
 
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = if (deployPrivateEndpoints || deployStoragePrivateEndpoint) {
   name: storageAccountName
-}
-
-resource sbNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' existing = if (deployPrivateEndpoints) {
-  name: serviceBusNamespaceName
 }
 
 resource searchService 'Microsoft.Search/searchServices@2023-11-01' existing = if (deployPrivateEndpoints) {
@@ -209,39 +223,6 @@ resource storagePrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateD
   }
 }
 
-resource sbPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = if (deployPrivateEndpoints) {
-  name: 'pe-${serviceBusNamespaceName}-namespace'
-  location: location
-  tags: tags
-  properties: {
-    subnet: { id: peSubnetId }
-    privateLinkServiceConnections: [
-      {
-        name: 'pl-${serviceBusNamespaceName}-namespace'
-        properties: {
-          privateLinkServiceId: sbNamespace.id
-          groupIds: ['namespace']
-        }
-      }
-    ]
-  }
-}
-
-resource sbPrivateDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2023-11-01' = if (deployPrivateEndpoints) {
-  parent: sbPrivateEndpoint
-  name: 'default'
-  properties: {
-    privateDnsZoneConfigs: [
-      {
-        name: 'privatelink-servicebus'
-        properties: {
-          privateDnsZoneId: privateDnsZones[2].id
-        }
-      }
-    ]
-  }
-}
-
 resource searchPrivateEndpoint 'Microsoft.Network/privateEndpoints@2023-11-01' = if (deployPrivateEndpoints) {
   name: 'pe-${searchServiceName}-searchService'
   location: location
@@ -316,9 +297,13 @@ output vnetId string = vnet.id
 output vnetName string = vnet.name
 output peSubnetId string = peSubnetId
 output functionsSubnetId string = functionsSubnetId
+output foundryAgentSubnetId string = foundryAgentSubnetId
 output containerAppsSubnetId string = containerAppsSubnetId
 output cosmosPrivateDnsZoneId string = privateDnsZones[0].id
 output storageBlobPrivateDnsZoneId string = privateDnsZones[1].id
 output serviceBusPrivateDnsZoneId string = privateDnsZones[2].id
 output searchPrivateDnsZoneId string = privateDnsZones[3].id
 output keyVaultPrivateDnsZoneId string = privateDnsZones[4].id
+output foundryServicesPrivateDnsZoneId string = privateDnsZones[5].id
+output foundryOpenAiPrivateDnsZoneId string = privateDnsZones[6].id
+output foundryCognitiveServicesPrivateDnsZoneId string = privateDnsZones[7].id

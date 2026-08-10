@@ -4,7 +4,6 @@ targetScope = 'resourceGroup'
 param location string
 param tags object
 param namespaceName string
-param deployPrivateEndpoints bool
 param agentIdentityPrincipalId string
 param workerIdentityPrincipalId string
 
@@ -26,7 +25,9 @@ resource sbNamespace 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
   properties: {
     minimumTlsVersion: '1.2'
     disableLocalAuth: true  // Require identity-based auth; SAS connection strings disabled
-    publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
+    // Private endpoints require Premium. Keep Standard public with local auth
+    // disabled and managed-identity RBAC to preserve the low-cost POC topology.
+    publicNetworkAccess: 'Enabled'
   }
 }
 
@@ -44,6 +45,25 @@ resource domainEventsQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-pr
     deadLetteringOnMessageExpiration: true
     enablePartitioning: false
     requiresDuplicateDetection: false
+    requiresSession: false
+  }
+}
+
+// Durable outbox target. The original domain-events queue is retained because
+// duplicate detection cannot be enabled in place. Stable outbox item IDs are
+// sent as Service Bus MessageId values, giving at-least-once dispatch bounded
+// duplicate suppression without destructive queue recreation.
+resource durableDomainEventsQueue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = {
+  parent: sbNamespace
+  name: 'domain-events-durable'
+  properties: {
+    maxDeliveryCount: 10
+    lockDuration: 'PT5M'
+    defaultMessageTimeToLive: 'P14D'
+    deadLetteringOnMessageExpiration: true
+    enablePartitioning: false
+    requiresDuplicateDetection: true
+    duplicateDetectionHistoryTimeWindow: 'P1D'
     requiresSession: false
   }
 }
@@ -130,6 +150,6 @@ resource workerSbOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 output namespaceId string = sbNamespace.id
 output namespaceName string = sbNamespace.name
 output namespaceFqdn string = '${sbNamespace.name}.servicebus.windows.net'
-output queueName string = domainEventsQueue.name
+output queueName string = durableDomainEventsQueue.name
 output documentGenerationQueueName string = documentGenerationQueue.name
 output notificationQueueName string = notificationQueue.name

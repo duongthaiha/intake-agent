@@ -1,0 +1,126 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.5",
+  "speak": "Capture field. ${field_label}. Current value: ${current_value}. Enter a new value below.",
+  "body": [
+    {
+      "type": "Container",
+      "style": "emphasis",
+      "bleed": true,
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "Capture Field",
+          "weight": "Bolder",
+          "size": "Medium",
+          "color": "Accent",
+          "wrap": true,
+          "id": "heading"
+        },
+        {
+          "type": "TextBlock",
+          "text": "Request: **${request_title}** — Revision ${current_revision}",
+          "wrap": true,
+          "spacing": "Small",
+          "id": "context"
+        }
+      ]
+    },
+    {
+      "type": "FactSet",
+      "spacing": "Medium",
+      "id": "field_context",
+      "facts": [
+        {
+          "title": "Field",
+          "value": "${field_label}"
+        },
+        {
+          "title": "Current value",
+          "value": "${current_value}"
+        },
+        {
+          "title": "Guidance",
+          "value": "${field_guidance}"
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Medium",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "New Value *",
+          "weight": "Bolder",
+          "wrap": true,
+          "id": "lbl_value"
+        },
+        {
+          "type": "Input.Text",
+          "id": "field_value",
+          "placeholder": "${field_placeholder}",
+          "label": "New value for ${field_label} (required)",
+          "isRequired": true,
+          "errorMessage": "Please enter a value before saving.",
+          "isMultiline": "${field_multiline}",
+          "maxLength": 2000
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "spacing": "Small",
+      "isVisible": "${show_confidence_selector}",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "How confident are you in this value?",
+          "weight": "Bolder",
+          "wrap": true,
+          "id": "lbl_confidence"
+        },
+        {
+          "type": "Input.ChoiceSet",
+          "id": "confidence_level",
+          "label": "Confidence level",
+          "value": "high",
+          "choices": [
+            { "title": "High — I am certain", "value": "high" },
+            { "title": "Medium — best estimate", "value": "medium" },
+            { "title": "Low — needs verification", "value": "low" }
+          ]
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.Execute",
+      "title": "Save",
+      "verb": "capture_field",
+      "associatedInputs": "auto",
+      "data": {
+        "field_path": "${field_path}",
+        "expected_revision": "${current_revision}"
+      },
+      "tooltip": "Save this value and continue",
+      "style": "positive",
+      "id": "btn_save"
+    },
+    {
+      "type": "Action.Execute",
+      "title": "Skip",
+      "verb": "capture_field",
+      "data": {
+        "field_path": "${field_path}",
+        "value": null,
+        "expected_revision": "${current_revision}",
+        "skip": true
+      },
+      "tooltip": "Skip this optional field for now",
+      "id": "btn_skip"
+    }
+  ]
+}

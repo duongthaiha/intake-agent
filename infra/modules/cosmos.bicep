@@ -36,7 +36,9 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
     capabilities: [
       { name: 'EnableServerless' }
     ]
+    enableAutomaticFailover: true
     enableAnalyticalStorage: false
+    disableLocalAuth: true
     publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
     networkAclBypass: 'AzureServices'
     networkAclBypassResourceIds: []
@@ -47,7 +49,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' = {
       }
     }
     minimalTlsVersion: 'Tls12'
-    disableKeyBasedMetadataWriteAccess: false
+    disableKeyBasedMetadataWriteAccess: true
   }
 }
 
@@ -80,6 +82,73 @@ resource requestsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/c
         kind: 'Hash'
         version: 2
       }
+      defaultTtl: -1
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [{ path: '/*' }]
+        excludedPaths: [{ path: '/"_etag"/?' }]
+      }
+    }
+  }
+}
+
+// The original requests container is retained because Cosmos partition keys
+// cannot be changed in place. Durable aggregates, revisions, workflow events,
+// and outbox records share /requestId so transactional batches are atomic.
+resource requestStateContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: intakeDatabase
+  name: 'request-state'
+  properties: {
+    resource: {
+      id: 'request-state'
+      partitionKey: {
+        paths: ['/requestId']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [{ path: '/*' }]
+        excludedPaths: [{ path: '/"_etag"/?' }]
+      }
+    }
+  }
+}
+
+resource templatesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: intakeDatabase
+  name: 'templates'
+  properties: {
+    resource: {
+      id: 'templates'
+      partitionKey: {
+        paths: ['/templateId']
+        kind: 'Hash'
+        version: 2
+      }
+      defaultTtl: -1
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        includedPaths: [{ path: '/*' }]
+        excludedPaths: [{ path: '/"_etag"/?' }]
+      }
+    }
+  }
+}
+
+resource idempotencyContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-05-15' = {
+  parent: intakeDatabase
+  name: 'idempotency'
+  properties: {
+    resource: {
+      id: 'idempotency'
+      partitionKey: {
+        paths: ['/scopeId']
+        kind: 'Hash'
+        version: 2
+      }
+      // Enables per-item TTL while retaining records that omit the ttl field.
       defaultTtl: -1
       indexingPolicy: {
         indexingMode: 'consistent'
@@ -166,3 +235,6 @@ output accountId string = cosmosAccount.id
 output accountName string = cosmosAccount.name
 output endpoint string = cosmosAccount.properties.documentEndpoint
 output databaseName string = intakeDatabase.name
+output requestsContainerName string = requestStateContainer.name
+output templatesContainerName string = templatesContainer.name
+output idempotencyContainerName string = idempotencyContainer.name
