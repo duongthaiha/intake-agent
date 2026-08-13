@@ -146,6 +146,7 @@ Service Bus messages and outbox dispatch work.
 ## Run locally
 
 Local mode uses in-memory repositories and requires no Azure subscription.
+No environment variables or Azure credentials are required.
 
 ### Local prerequisites
 
@@ -153,54 +154,65 @@ Local mode uses in-memory repositories and requires no Azure subscription.
 - Git
 - PowerShell, Bash, or another terminal
 
-### Install
+### Quick start
 
-PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-Bash:
+Bash (Linux, macOS, or this dev container):
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-Do not configure Azure backends for this path. The defaults are:
-
-```text
-INTAKE_ENVIRONMENT=local
-INTAKE_PERSISTENCE_BACKEND=inmemory
-INTAKE_BLOB_BACKEND=inmemory
-INTAKE_SERVICEBUS_BACKEND=inmemory
-```
-
-### Start the local API
-
-```powershell
+python -m pip install -e .
 intake-demo
 ```
 
-Or run Uvicorn directly:
+PowerShell (Windows):
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+intake-demo
+```
+
+The API starts at `http://127.0.0.1:8000`. Open
+`http://127.0.0.1:8000/docs` for the interactive API documentation.
+
+To use auto-reload while changing Python files, run this instead of
+`intake-demo`:
+
+```bash
 python -m uvicorn intake_agent.main:app --reload --port 8000
 ```
 
-Check the service:
+### Try the local API
+
+In a second terminal, check the service:
+
+Bash:
+
+```bash
+curl --fail http://127.0.0.1:8000/health
+```
+
+PowerShell:
 
 ```powershell
-Invoke-RestMethod http://localhost:8000/health
+Invoke-RestMethod http://127.0.0.1:8000/health
 ```
 
 Create or resume a request:
+
+Bash:
+
+```bash
+curl --fail --request POST http://127.0.0.1:8000/requests \
+  --header "Content-Type: application/json" \
+  --data '{"user_id":"alice","conversation_id":"local-conversation-1"}'
+```
+
+PowerShell:
 
 ```powershell
 $body = @{
@@ -210,12 +222,22 @@ $body = @{
 
 $request = Invoke-RestMethod `
     -Method Post `
-    -Uri http://localhost:8000/requests `
+    -Uri http://127.0.0.1:8000/requests `
     -ContentType "application/json" `
     -Body $body
 
 $request
 ```
+
+Local state is stored in memory and resets whenever the API process stops. Do
+not configure Azure backends for this path; the local defaults select in-memory
+persistence, blob storage, and event publishing.
+
+The request fields are authored as JSON Schema in
+`src/intake_domain/template_schemas/general-intake-v1.schema.json`. Edit that
+schema—not Python seed code—to change a future template version. The runtime
+flattens nested leaf properties such as `project.name` into the domain field
+paths used by the API and agent tools.
 
 The local API exposes:
 

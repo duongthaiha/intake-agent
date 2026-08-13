@@ -18,6 +18,21 @@ pip install -e ".[dev]"
 uvicorn intake_agent.main:app --reload --port 8000
 ```
 
+## Intake template schema
+
+The canonical default template is the Draft 2020-12 JSON Schema at
+`src/intake_domain/template_schemas/general-intake-v1.schema.json`. Standard
+`properties`, `required`, `type`, `enum`, `title`, `description`, and `format`
+keywords describe request data. Root `x-intake` metadata identifies the
+template version and carries its quality threshold; leaf `x-intake` metadata
+may override the confidence threshold.
+
+The loader validates the schema and flattens nested leaves into the existing
+dotted domain paths. Unsupported constructs such as arrays, references, and
+composition keywords fail startup explicitly. Current value validation remains
+behavior-compatible and continues to accept the same number and boolean string
+forms as before.
+
 ## Microsoft Foundry Hosted Agent
 
 `hosted_main.py` is the direct-code deployment entry point. It uses Foundry's

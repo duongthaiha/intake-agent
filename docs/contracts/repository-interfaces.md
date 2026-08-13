@@ -133,7 +133,9 @@ Located in `src/intake_persistence/cosmos/` and `src/intake_persistence/blob/`:
   the atomic outbox write, so handlers do not perform a second fallible enqueue.
   Explicit enqueue remains exact-payload idempotent by event ID and rejects
   differing payloads as a collision.
-- `CosmosTemplateRepository` reads immutable template versions from `templates`
+- `CosmosTemplateRepository` reads immutable template versions from `templates`.
+  Every template document carries a canonical Draft 2020-12 `jsonSchema` that
+  is adapted to `TemplateVersion`. Documents without `jsonSchema` are rejected.
   partitioned by `/templateId`.
 - `CosmosIdempotencyStore` uses item-level TTL documents in `idempotency`
   partitioned by `/scopeId`.

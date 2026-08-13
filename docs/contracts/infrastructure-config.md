@@ -61,8 +61,15 @@ environment uses `request-state` because the retained legacy `requests`
 container has immutable partition key `/tenantId`; it must not be destructively
 recreated. The configured default template must be seeded before the Hosted
 Agent starts. Its document ID is `version:{version}`; it must have
-`docType=templateVersion`, `templateId`, `version`, `displayName`, `fields`,
-`qualityThreshold`, `isActive`, and `createdAt`.
+`docType=templateVersion`, `templateId`, `version`, `displayName`,
+`jsonSchema`, `qualityThreshold`, `isActive`, and `createdAt`. `jsonSchema` is
+the canonical Draft 2020-12 request contract. The envelope duplicates only the
+metadata required for Cosmos lookup and active-version selection, and must
+match the schema's `title` and root `x-intake` metadata.
+
+The current `general-intake-v1` schema version is `1.1.0`. Templates are
+authored in `src/intake_domain/template_schemas/` and seeded from the packaged
+schema. The runtime does not support the superseded `fields[]` document shape.
 
 The deployed outbox destination is `domain-events-durable`. It has duplicate
 detection enabled and is selected through `INTAKE_SERVICEBUS_QUEUE`. The legacy

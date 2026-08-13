@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from intake_domain.entities import (
-    FieldSchema,
     FieldValue,
     Gap,
     GapCategory,
@@ -207,26 +206,31 @@ def outbox_from_document(document: dict[str, Any]) -> OutboxItem:
 
 
 def template_from_document(document: dict[str, Any]) -> TemplateVersion:
-    return TemplateVersion(
-        template_id=str(document["templateId"]),
-        version=str(document["version"]),
-        display_name=str(document["displayName"]),
-        fields=[
-            FieldSchema(
-                field_path=str(value["fieldPath"]),
-                label=str(value["label"]),
-                field_type=str(value["fieldType"]),
-                required=bool(value.get("required", True)),
-                enum_values=[str(item) for item in value.get("enumValues", [])],
-                min_confidence=float(value.get("minConfidence", 0.7)),
-                description=str(value.get("description", "")),
+    json_schema = document.get("jsonSchema")
+    if not isinstance(json_schema, dict):
+        raise ValueError("Template document must define a jsonSchema object")
+    from intake_domain.template_schema import TemplateSchemaError, template_from_json_schema
+
+    try:
+        template = template_from_json_schema(
+            json_schema,
+            created_at=datetime_from_json(str(document["createdAt"])),
+        )
+    except TemplateSchemaError as exc:
+        raise ValueError(f"Invalid template jsonSchema: {exc}") from exc
+    envelope_values = {
+        "templateId": template.template_id,
+        "version": template.version,
+        "displayName": template.display_name,
+        "qualityThreshold": template.quality_threshold,
+        "isActive": template.is_active,
+    }
+    for key, expected in envelope_values.items():
+        if document.get(key) != expected:
+            raise ValueError(
+                f"Template envelope {key} does not match jsonSchema metadata"
             )
-            for value in _list_of_dicts(document.get("fields"))
-        ],
-        quality_threshold=float(document.get("qualityThreshold", 0.8)),
-        is_active=bool(document.get("isActive", True)),
-        created_at=datetime_from_json(str(document["createdAt"])),
-    )
+    return template
 
 
 def stored_result_to_document(result: StoredResult, ttl_seconds: int) -> dict[str, Any]:

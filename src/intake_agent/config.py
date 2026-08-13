@@ -167,7 +167,14 @@ def build_repositories(settings: IntakeSettings | None = None) -> dict[str, obje
         idempotency_store = InMemoryIdempotencyStore()
 
         # Seed a default template for local demo
-        _seed_default_template(template_repo, cfg.template_id)
+        from intake_domain.template_schema import TemplateSchemaError, load_packaged_template
+
+        try:
+            template_repo.seed(load_packaged_template(cfg.template_id))
+        except TemplateSchemaError as exc:
+            raise IntakeConfigurationError(
+                f"Unable to load intake template {cfg.template_id!r}: {exc}"
+            ) from exc
 
     else:
         # Cosmos adapters — require Azure endpoints
@@ -229,61 +236,3 @@ def build_repositories(settings: IntakeSettings | None = None) -> dict[str, obje
         "idempotency_store": idempotency_store,
         "artifact_store": artifact_store,
     }
-
-
-def _seed_default_template(repo: object, template_id: str) -> None:
-    from intake_domain.entities import FieldSchema, TemplateVersion
-
-    template = TemplateVersion(
-        template_id=template_id,
-        version="1.0.0",
-        display_name="General Intake Form",
-        fields=[
-            FieldSchema(
-                field_path="project.name",
-                label="Project Name",
-                field_type="string",
-                required=True,
-                description="Short name for the initiative or project",
-            ),
-            FieldSchema(
-                field_path="project.description",
-                label="Project Description",
-                field_type="string",
-                required=True,
-                description="Brief description of what is needed and why",
-            ),
-            FieldSchema(
-                field_path="requester.business_unit",
-                label="Business Unit",
-                field_type="string",
-                required=True,
-                description="The business unit sponsoring this request",
-            ),
-            FieldSchema(
-                field_path="budget.amount",
-                label="Budget (USD)",
-                field_type="number",
-                required=False,
-                description="Estimated budget in USD",
-            ),
-            FieldSchema(
-                field_path="timeline.target_date",
-                label="Target Completion Date",
-                field_type="string",
-                required=False,
-                description="Desired completion date (YYYY-MM-DD)",
-            ),
-            FieldSchema(
-                field_path="priority",
-                label="Priority",
-                field_type="enum",
-                required=True,
-                enum_values=["low", "medium", "high", "critical"],
-                description="Business priority of the request",
-            ),
-        ],
-        quality_threshold=0.7,
-        is_active=True,
-    )
-    repo.seed(template)  # type: ignore[attr-defined]

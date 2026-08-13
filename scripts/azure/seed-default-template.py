@@ -9,8 +9,10 @@ from azure.cosmos import exceptions
 from azure.cosmos.aio import CosmosClient
 from azure.identity.aio import DefaultAzureCredential
 
+from intake_domain.template_schema import load_packaged_json_schema, template_from_json_schema
+
 TEMPLATE_ID = "general-intake-v1"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 
 def _required(name: str) -> str:
@@ -21,61 +23,38 @@ def _required(name: str) -> str:
 
 
 def _template_document() -> dict[str, object]:
+    schema = load_packaged_json_schema(TEMPLATE_ID)
+    template = template_from_json_schema(schema)
+    if template.version != VERSION:
+        raise RuntimeError(
+            f"Packaged template version {template.version!r} does not match seed version {VERSION!r}"
+        )
     return {
         "id": f"version:{VERSION}",
         "docType": "templateVersion",
-        "templateId": TEMPLATE_ID,
-        "version": VERSION,
-        "displayName": "General Intake Form",
-        "fields": [
-            {
-                "fieldPath": "project.name",
-                "label": "Project Name",
-                "fieldType": "string",
-                "required": True,
-                "description": "Short name for the initiative or project",
-            },
-            {
-                "fieldPath": "project.description",
-                "label": "Project Description",
-                "fieldType": "string",
-                "required": True,
-                "description": "Brief description of what is needed and why",
-            },
-            {
-                "fieldPath": "requester.business_unit",
-                "label": "Business Unit",
-                "fieldType": "string",
-                "required": True,
-                "description": "The business unit sponsoring this request",
-            },
-            {
-                "fieldPath": "budget.amount",
-                "label": "Budget (USD)",
-                "fieldType": "number",
-                "required": False,
-                "description": "Estimated budget in USD",
-            },
-            {
-                "fieldPath": "timeline.target_date",
-                "label": "Target Completion Date",
-                "fieldType": "string",
-                "required": False,
-                "description": "Desired completion date (YYYY-MM-DD)",
-            },
-            {
-                "fieldPath": "priority",
-                "label": "Priority",
-                "fieldType": "enum",
-                "required": True,
-                "enumValues": ["low", "medium", "high", "critical"],
-                "description": "Business priority of the request",
-            },
-        ],
-        "qualityThreshold": 0.7,
-        "isActive": True,
+        "templateId": template.template_id,
+        "version": template.version,
+        "displayName": template.display_name,
+        "jsonSchema": schema,
+        "qualityThreshold": template.quality_threshold,
+        "isActive": template.is_active,
         "createdAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
+
+
+def _matches_canonical_template(document: dict[str, object]) -> bool:
+    expected = _template_document()
+    keys = (
+        "id",
+        "docType",
+        "templateId",
+        "version",
+        "displayName",
+        "jsonSchema",
+        "qualityThreshold",
+        "isActive",
+    )
+    return all(document.get(key) == expected[key] for key in keys)
 
 
 async def main() -> None:
@@ -103,12 +82,10 @@ async def main() -> None:
             await container.create_item(_template_document())
             print(f"created template {TEMPLATE_ID}:{VERSION}")
         else:
-            if (
-                existing.get("docType") != "templateVersion"
-                or existing.get("templateId") != TEMPLATE_ID
-                or existing.get("version") != VERSION
-            ):
-                raise RuntimeError("Existing template document does not match contract")
+            if not _matches_canonical_template(existing):
+                raise RuntimeError(
+                    "Existing template document conflicts with the canonical schema"
+                )
             print(f"template {TEMPLATE_ID}:{VERSION} already exists")
     finally:
         await client.close()
