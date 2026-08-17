@@ -406,9 +406,9 @@ The deployment uses:
   keys `/requestId`, `/templateId`, and `/scopeId`.
 - The `domain-events-durable` Service Bus queue with duplicate detection.
 
-The default template must exist before users create requests. Infrastructure
-and deployment automation use
-`scripts/azure/seed-default-template.py` for this step.
+On first use, the Hosted Agent idempotently publishes its packaged canonical
+JSON Schema template through its VNet-connected managed identity. This avoids
+an external data-plane seed step against the private Cosmos endpoint.
 
 Detailed runtime variables, resource shape, RBAC, and worker package
 requirements are documented in

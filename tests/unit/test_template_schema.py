@@ -4,7 +4,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -21,8 +23,21 @@ from intake_domain.template_schema import (
     template_from_json_schema,
 )
 from intake_persistence._serialization import template_from_document
+from intake_persistence.cosmos import CosmosTemplateRepository
 
 pytestmark = pytest.mark.unit
+
+
+class _AsyncDocuments:
+    def __init__(self, documents: list[dict[str, Any]]) -> None:
+        self._documents = documents
+
+    def __aiter__(self):  # type: ignore[no-untyped-def]
+        async def iterate():  # type: ignore[no-untyped-def]
+            for document in self._documents:
+                yield document
+
+        return iterate()
 
 
 def test_packaged_schema_is_valid_and_preserves_intake_contract() -> None:
@@ -159,3 +174,40 @@ def test_fields_array_template_document_is_rejected() -> None:
                 "createdAt": "2026-08-07T00:00:00Z",
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_cosmos_repository_seeds_packaged_schema_when_none_exists() -> None:
+    container = SimpleNamespace(
+        query_items=MagicMock(return_value=_AsyncDocuments([])),
+        create_item=AsyncMock(),
+    )
+    repository = CosmosTemplateRepository(
+        "",
+        "",
+        context=SimpleNamespace(templates=container),  # type: ignore[arg-type]
+    )
+
+    template = await repository.get_active("general-intake-v1")
+
+    assert template is not None
+    assert template.version == "1.1.0"
+    seeded_document = container.create_item.await_args.args[0]
+    assert seeded_document["jsonSchema"]["x-intake"]["version"] == "1.1.0"
+    assert "fields" not in seeded_document
+
+
+@pytest.mark.asyncio
+async def test_cosmos_repository_does_not_seed_unknown_template() -> None:
+    container = SimpleNamespace(
+        query_items=MagicMock(return_value=_AsyncDocuments([])),
+        create_item=AsyncMock(),
+    )
+    repository = CosmosTemplateRepository(
+        "",
+        "",
+        context=SimpleNamespace(templates=container),  # type: ignore[arg-type]
+    )
+
+    assert await repository.get_active("unknown") is None
+    container.create_item.assert_not_awaited()

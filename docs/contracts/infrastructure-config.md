@@ -59,8 +59,9 @@ application atomically commits projection, revision, audit event, and outbox.
 Physical names are configuration, not adapter constants. The deployed
 environment uses `request-state` because the retained legacy `requests`
 container has immutable partition key `/tenantId`; it must not be destructively
-recreated. The configured default template must be seeded before the Hosted
-Agent starts. Its document ID is `version:{version}`; it must have
+recreated. On first use, the Hosted Agent idempotently seeds its packaged
+canonical template through managed identity. Its document ID is
+`version:{version}`; it must have
 `docType=templateVersion`, `templateId`, `version`, `displayName`,
 `jsonSchema`, `qualityThreshold`, `isActive`, and `createdAt`. `jsonSchema` is
 the canonical Draft 2020-12 request contract. The envelope duplicates only the

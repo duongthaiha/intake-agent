@@ -2,7 +2,7 @@ name: intake-agent-essential-acceptance
 agent:
     name: intake-agent
     kind: hosted
-    version: "8"
+    version: "9"
     model: gpt-5-nano
 dataset:
     local_uri: evaluation/dataset/foundry_smoke.jsonl

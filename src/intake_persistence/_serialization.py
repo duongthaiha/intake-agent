@@ -233,6 +233,23 @@ def template_from_document(document: dict[str, Any]) -> TemplateVersion:
     return template
 
 
+def template_to_document(
+    template: TemplateVersion,
+    json_schema: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": f"version:{template.version}",
+        "docType": "templateVersion",
+        "templateId": template.template_id,
+        "version": template.version,
+        "displayName": template.display_name,
+        "jsonSchema": json_schema,
+        "qualityThreshold": template.quality_threshold,
+        "isActive": template.is_active,
+        "createdAt": datetime_to_json(template.created_at),
+    }
+
+
 def stored_result_to_document(result: StoredResult, ttl_seconds: int) -> dict[str, Any]:
     import hashlib
 

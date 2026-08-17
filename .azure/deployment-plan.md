@@ -1,6 +1,6 @@
 ﻿# Azure Deployment Plan
 
-> **Status:** ✅ **Deployed** — Production-durable Hosted Agent `intake-agent:8` is active, privately verified, and backed by Cosmos DB, Blob Storage, and Service Bus through managed identity.
+> **Status:** ✅ **Deployed and Verified** — Hosted Agent `intake-agent:9` is active in `dev` with canonical JSON Schema template version `1.1.0`.
 
 Generated: 2026-08-07T16:08:46Z
 Revised: 2026-08-07T16:22:00Z (Tank — Fact Checker revision cycle)
@@ -2204,3 +2204,65 @@ python3 -m pytest tests/azure/test_hosted_durable_persistence.py -m azure -q -s
 The job, temporary Foundry Agent Consumer assignment, temporary delegated-user
 impersonation assignment/custom role, and local job artifacts were removed after
 the run. Networking was not changed.
+
+---
+
+## Section 34 — JSON Schema Hosted Agent Validation (2026-08-13)
+
+**Scope:** Deploy a new `intake-agent` direct-code version containing canonical
+Draft 2020-12 template version `1.1.0`. No infrastructure provisioning is
+required.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Azure context | ✅ PASS | Subscription `87e1a785-896b-4eb4-a214-47f67995133e`; existing `rg-intake-dev` in `eastus2` is `Succeeded` |
+| azd + Foundry extension | ✅ PASS | azd `1.31.0`; `azure.ai.agents` `1.0.0-beta.9` |
+| Source tests | ✅ PASS | `763 passed, 1 Azure-only test skipped` |
+| Ruff / mypy / import-linter | ✅ PASS | 0 lint/type errors; 4 import contracts kept |
+| Bicep build + lint | ✅ PASS | `infra/main.bicep` compiled and linted without error |
+| Project configuration | ✅ PASS | `azure.yaml` parses as Bicep with one `azure.ai.agent` service |
+| Azure preflight | ✅ PASS | 0 errors; Bot Service remains intentionally gated |
+| Azure policy | ✅ PASS | Existing subscription assignments reviewed; no new policy blocker |
+| Static RBAC | ✅ PASS | Agent/worker data-plane roles remain resource-scoped |
+| ARM what-if | ✅ PASS | Exit 0; no create/delete operations. Infrastructure deployment intentionally omitted for this code-only release |
+| Direct-code package | ✅ PASS | Flat 52 KB archive; root entry point and dependency manifests present; canonical schema included; no local/dev artifacts |
+| Existing agent lookup | ✅ PASS | `intake-agent:8` is active; current definition and managed-identity settings used as the deployment baseline |
+
+The normal `azd package` path packaged the worker successfully but could not
+package the Hosted Agent because azd has no noninteractive login in this
+runner. The validated direct-code REST path uses the already authenticated
+Azure CLI identity and is the established deployment mechanism for this
+Hosted Agent. This is not an infrastructure validation failure.
+
+---
+
+## Section 35 — JSON Schema Hosted Agent Deployment (2026-08-13)
+
+| Item | Result |
+|---|---|
+| Deployment | New immutable Hosted Agent version `intake-agent:9` |
+| State | `active` |
+| Code hash | `cbeaf40e04d2b432dec8b2a4c1d6f1f1982c722a3f379a70dfe7b5aeb383b231` |
+| Project endpoint | `https://ais-intake-2k2osaev.services.ai.azure.com/api/projects/aiproj-intake-dev` |
+| Runtime | Python 3.13, Responses 2.0.0, remote dependency build |
+| Agent identity | `7698b8bc-55ea-49b5-b2a8-ad06a16a1e9e` |
+| Cosmos role | Built-in Data Contributor scoped to database `intake` |
+| Blueprint roles | Foundry invocation, Blob Data Contributor, Blob Delegator, and Service Bus Data Sender verified at resource scope |
+
+The package was uploaded with the Foundry direct-code versions API and the
+required SHA-256 header. Version 8 was not modified and remains available for
+rollback.
+
+Post-deployment invocation returned HTTP 200 with response status `completed`.
+The agent self-created the schema-backed template through private Cosmos
+networking, then accepted:
+
+- `project.name`
+- `project.description`
+- `requester.business_unit`
+- `priority`
+
+All four required gaps were resolved. The smoke request was intentionally not
+submitted. `eval.yaml` now targets version 9; the installed Foundry azd
+extension does not expose an evaluation command, so no remote evaluation run
+was started from this runner.

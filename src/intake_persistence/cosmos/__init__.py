@@ -40,6 +40,7 @@ from intake_persistence._serialization import (
     stored_result_from_document,
     stored_result_to_document,
     template_from_document,
+    template_to_document,
     workflow_event_to_document,
     workflow_event_to_outbox,
 )
@@ -494,7 +495,8 @@ class CosmosTemplateRepository(TemplateRepository):
     async def get_active(self, template_id: str) -> TemplateVersion | None:
         query = (
             "SELECT TOP 1 * FROM c WHERE c.docType = 'templateVersion' "
-            "AND c.isActive = true ORDER BY c.createdAt DESC"
+            "AND c.isActive = true AND IS_DEFINED(c.jsonSchema) "
+            "ORDER BY c.createdAt DESC"
         )
         try:
             iterator = self._container.query_items(
@@ -504,9 +506,37 @@ class CosmosTemplateRepository(TemplateRepository):
             )
             async for document in iterator:
                 return template_from_document(cast(dict[str, Any], document))
-            return None
         except exceptions.CosmosHttpResponseError as exc:
             _raise_cosmos_error(exc, "read active template")
+
+        from intake_domain.template_schema import (
+            TemplateSchemaError,
+            load_packaged_json_schema,
+            template_from_json_schema,
+        )
+
+        try:
+            json_schema = load_packaged_json_schema(template_id)
+            template = template_from_json_schema(json_schema)
+        except TemplateSchemaError:
+            return None
+
+        try:
+            await self._container.create_item(
+                template_to_document(template, json_schema)
+            )
+            return template
+        except exceptions.CosmosResourceExistsError as exc:
+            winner = await self.get_version(template.template_id, template.version)
+            if winner is not None:
+                return winner
+            raise PermanentError(
+                "Template creation conflicted but the winning version was not readable",
+                template_id=template.template_id,
+                template_version=template.version,
+            ) from exc
+        except exceptions.CosmosHttpResponseError as exc:
+            _raise_cosmos_error(exc, "seed active template")
 
     async def get_version(self, template_id: str, version: str) -> TemplateVersion | None:
         try:
