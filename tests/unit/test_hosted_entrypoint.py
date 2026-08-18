@@ -1,6 +1,7 @@
 """Targeted tests for the Microsoft Foundry Responses entry point."""
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -19,6 +20,7 @@ from intake_agent.hosted import (
     _resolve_platform_isolation,
     build_hosted_runtime,
     build_responses_server,
+    create_intake_tools,
     get_hosted_runtime,
     resolve_foundry_configuration,
 )
@@ -215,13 +217,34 @@ def test_agent_instructions_preserve_deterministic_boundary() -> None:
     assert "Reviewer decisions are outside" in AGENT_INSTRUCTIONS
 
 
+@pytest.mark.asyncio
+async def test_local_dev_tools_bind_fixed_development_identity() -> None:
+    runtime = build_hosted_runtime(_local_settings())
+    tools = {
+        item.name: item
+        for item in create_intake_tools(
+            runtime,
+            local_dev_identity=("devui-user", "devui-chat"),
+        )
+    }
+
+    context = await tools["get_intake_context"].func()
+
+    assert context["current_revision"] == 1
+    assert context["status"] == "new"
+
+
 def test_direct_code_packaging_contract() -> None:
     repository_root = Path(__file__).parents[2]
 
     assert (repository_root / "hosted_main.py").is_file()
     assert (repository_root / "requirements.txt").read_text().strip().endswith(".")
-    pyproject = (repository_root / "pyproject.toml").read_text()
-    assert "agent-framework-foundry-hosting" in pyproject
+    pyproject = tomllib.loads((repository_root / "pyproject.toml").read_text())
+    dependencies = pyproject["project"]["dependencies"]
+    devui_dependencies = pyproject["project"]["optional-dependencies"]["devui"]
+    assert any("agent-framework-foundry-hosting" in item for item in dependencies)
+    assert not any("agent-framework-devui" in item for item in dependencies)
+    assert any("agent-framework-devui" in item for item in devui_dependencies)
     ignore = (repository_root / ".agentignore").read_text()
     assert ".env" in ignore
     assert "infra/" in ignore

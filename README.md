@@ -186,6 +186,32 @@ To use auto-reload while changing Python files, run this instead of
 python -m uvicorn intake_agent.main:app --reload --port 8000
 ```
 
+### Test the agent in a browser
+
+The Agent Framework DevUI provides a local chat interface for the hosted agent.
+It uses the same instructions and deterministic tools as the Foundry Responses
+host, with a fixed local-only development identity.
+
+```bash
+python -m pip install -e ".[devui]"
+az login
+cp .env.example .env
+# Fill in the Foundry project endpoint and model deployment in .env.
+intake-devui
+```
+
+Open `http://127.0.0.1:8080` and use the authentication token printed by
+DevUI. Set `INTAKE_DEVUI_PORT` to choose another port. Local requests use
+in-memory persistence and are reset when the process stops.
+
+DevUI is intentionally isolated from production:
+
+- `agent-framework-devui` is installed only through the optional `devui` extra.
+- `intake-devui` binds to `127.0.0.1` and refuses to run unless
+  `INTAKE_ENVIRONMENT=local`.
+- Foundry direct-code builds install `requirements.txt`, which installs only
+  the base project (`.`) and does not include the DevUI dependency.
+
 ### Try the local API
 
 In a second terminal, check the service:

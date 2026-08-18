@@ -41,9 +41,13 @@ dev = [
     "import-linter>=2.1",
     "coverage[toml]>=7.5",
 ]
+devui = [
+    "agent-framework-devui>=1.0.0b260813,<2",
+]
 
 [project.scripts]
 intake-demo = "intake_agent.main:cli"
+intake-devui = "intake_agent.devui:run"
 
 [tool.hatch.build.targets.wheel]
 packages = [

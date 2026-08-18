@@ -5,10 +5,10 @@ import hashlib
 import logging
 import os
 import warnings
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextvars import ContextVar, Token
 from functools import lru_cache
-from typing import Annotated, Any, cast
+from typing import Annotated, Any, TypeVar, cast
 from uuid import uuid4
 
 with warnings.catch_warnings():
@@ -33,6 +33,7 @@ from intake_agent.config import (
 from intake_domain.entities import ActorContext
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 AGENT_INSTRUCTIONS = """# Role and objective
 You are the Intake Agent. Help the requester create an accurate, structured
@@ -118,6 +119,24 @@ class HostedRuntime:
             conversation_id=conversation_id,
         )
         return _current_actor.set(actor)
+
+    def bind_local_actor(
+        self,
+        *,
+        user_isolation_key: str,
+        chat_isolation_key: str,
+    ) -> Token[ActorContext | None]:
+        """Bind a fixed actor for loopback-only local development surfaces."""
+        if self._settings.environment.strip().lower() != "local":
+            raise IntakeConfigurationError(
+                "Local development identity is unavailable outside local mode"
+            )
+        return self.bind_actor(
+            user_isolation_key=user_isolation_key,
+            chat_isolation_key=chat_isolation_key,
+            response_id=str(uuid4()),
+            conversation_id=chat_isolation_key,
+        )
 
     @staticmethod
     def reset_actor(token: Token[ActorContext | None]) -> None:
@@ -262,11 +281,29 @@ def resolve_foundry_configuration(
     return endpoint, model
 
 
-def create_intake_tools(runtime: HostedRuntime) -> Sequence[Any]:
+def create_intake_tools(
+    runtime: HostedRuntime,
+    *,
+    local_dev_identity: tuple[str, str] | None = None,
+) -> Sequence[Any]:
+    async def invoke(operation: Callable[[], Awaitable[T]]) -> T:
+        if local_dev_identity is None:
+            return await operation()
+
+        user_key, chat_key = local_dev_identity
+        token = runtime.bind_local_actor(
+            user_isolation_key=user_key,
+            chat_isolation_key=chat_key,
+        )
+        try:
+            return await operation()
+        finally:
+            runtime.reset_actor(token)
+
     @tool(approval_mode="never_require")
     async def get_intake_context() -> dict[str, Any]:
         """Load authoritative persisted fields, gaps, revision, and allowed actions."""
-        return await runtime.get_context()
+        return await invoke(runtime.get_context)
 
     @tool(approval_mode="never_require")
     async def update_intake_field(
@@ -292,12 +329,14 @@ def create_intake_tools(runtime: HostedRuntime) -> Sequence[Any]:
         ] = None,
     ) -> dict[str, Any]:
         """Submit one candidate field update through deterministic validation."""
-        return await runtime.update_field(
-            expected_revision=expected_revision,
-            field_path=field_path,
-            value=value,
-            source_reference=source_reference,
-            model_confidence=model_confidence,
+        return await invoke(
+            lambda: runtime.update_field(
+                expected_revision=expected_revision,
+                field_path=field_path,
+                value=value,
+                source_reference=source_reference,
+                model_confidence=model_confidence,
+            )
         )
 
     @tool(approval_mode="never_require")
@@ -308,12 +347,14 @@ def create_intake_tools(runtime: HostedRuntime) -> Sequence[Any]:
         ],
     ) -> dict[str, Any]:
         """Submit the current request only after explicit user confirmation."""
-        return await runtime.submit_for_review(expected_revision=expected_revision)
+        return await invoke(
+            lambda: runtime.submit_for_review(expected_revision=expected_revision)
+        )
 
     @tool(approval_mode="never_require")
     async def list_my_intake_requests() -> list[dict[str, Any]]:
         """List requests scoped to the platform-isolated current user."""
-        return await runtime.list_requests()
+        return await invoke(runtime.list_requests)
 
     return [
         get_intake_context,
@@ -321,6 +362,26 @@ def create_intake_tools(runtime: HostedRuntime) -> Sequence[Any]:
         submit_intake_for_review,
         list_my_intake_requests,
     ]
+
+
+def create_intake_agent(
+    client: FoundryChatClient,
+    runtime: HostedRuntime,
+    *,
+    local_dev_identity: tuple[str, str] | None = None,
+) -> Agent:
+    """Create the shared Intake Agent with hosted or local tool isolation."""
+    return Agent(
+        client=client,
+        name="intake-agent",
+        description="Captures and validates structured enterprise intake requests.",
+        instructions=AGENT_INSTRUCTIONS,
+        tools=create_intake_tools(
+            runtime,
+            local_dev_identity=local_dev_identity,
+        ),
+        default_options={"store": True, "include": []},
+    )
 
 
 def build_responses_server(
@@ -335,14 +396,7 @@ def build_responses_server(
         model=model,
         credential=credential,
     )
-    agent = Agent(
-        client=client,
-        name="intake-agent",
-        description="Captures and validates structured enterprise intake requests.",
-        instructions=AGENT_INSTRUCTIONS,
-        tools=create_intake_tools(runtime),
-        default_options={"store": True, "include": []},
-    )
+    agent = create_intake_agent(client, runtime)
     return IntakeResponsesHostServer(agent, runtime)
 
 

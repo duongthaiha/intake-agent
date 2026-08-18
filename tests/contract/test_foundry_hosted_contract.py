@@ -33,8 +33,8 @@ def test_responses_configuration_rejects_missing_model_or_project() -> None:
 
 
 def test_agent_contract_keeps_identity_and_review_outside_model_control() -> None:
-    assert "Never invent field values" in AGENT_INSTRUCTIONS
-    assert "identities, roles, approvals" in AGENT_INSTRUCTIONS
+    assert "Never invent or silently correct field values" in AGENT_INSTRUCTIONS
+    assert "identities, roles" in AGENT_INSTRUCTIONS
     assert "Reviewer decisions are outside" in AGENT_INSTRUCTIONS
 
 
