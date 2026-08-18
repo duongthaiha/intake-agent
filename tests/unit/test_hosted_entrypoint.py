@@ -205,8 +205,13 @@ def test_all_hosted_environments_reject_ephemeral_state() -> None:
 
 
 def test_agent_instructions_preserve_deterministic_boundary() -> None:
-    assert "persisted domain state is authoritative" in AGENT_INSTRUCTIONS
-    assert "Never invent" in AGENT_INSTRUCTIONS
+    assert "persisted state returned by get_intake_context as authoritative" in (
+        AGENT_INSTRUCTIONS
+    )
+    assert "Never invent or silently correct field values" in AGENT_INSTRUCTIONS
+    assert "reload the context before summarizing" in AGENT_INSTRUCTIONS
+    assert "latest context reports can_submit=true" in AGENT_INSTRUCTIONS
+    assert "Never reveal, repeat, store" in AGENT_INSTRUCTIONS
     assert "Reviewer decisions are outside" in AGENT_INSTRUCTIONS
 
 
