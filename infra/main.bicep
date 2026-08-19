@@ -27,12 +27,96 @@ param deployBotService bool = false
 @description('Override region for AI Search service only. eastus2 has been observed to have InsufficientResourcesAvailable for new AI Search services; set to eastus as fallback.')
 param searchServiceLocation string = 'eastus'
 
+@minLength(1)
+@description('Client ID of the secretless Entra application protecting the prompt intake MCP API.')
+param intakeMcpAppClientId string
+
+@minLength(1)
+@description('Immutable private ACR image reference for the prompt intake MCP service.')
+param intakeMcpImage string
+
 @description('Tags applied to every resource in the resource group.')
 param tags object = {
   'azd-env-name': environmentName
   project: 'intake-agent'
   environment: environmentName
   'managed-by': 'azd-bicep'
+}
+
+// ---------------------------------------------------------------------------
+// Prompt-agent MCP API — separate internal Container Apps trust boundary
+// ---------------------------------------------------------------------------
+
+resource sharedPrivateAcr 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: 'acr${resourceToken}'
+}
+
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+var acrPushRoleId = '8311e382-0749-4cb8-b61a-304f252e45ec'
+var mcpIdentityResourceId = resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', 'id-intake-mcp-${environmentName}')
+
+resource mcpAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sharedPrivateAcr.id, mcpIdentityResourceId, acrPullRoleId)
+  scope: sharedPrivateAcr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
+    principalId: identity.outputs.mcpIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deployerAcrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sharedPrivateAcr.id, principalId, acrPushRoleId)
+  scope: sharedPrivateAcr
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPushRoleId)
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+module mcpRuntime 'modules/mcp-container-apps.bicep' = {
+  name: 'mcpRuntime'
+  params: {
+    location: location
+    tags: tags
+    environmentName: 'cae-intake-mcp-${environmentName}'
+    appName: 'ca-intake-mcp-${environmentName}'
+    subnetId: network.outputs.mcpSubnetId
+    image: intakeMcpImage
+    acrLoginServer: sharedPrivateAcr.properties.loginServer
+    mcpIdentityId: identity.outputs.mcpIdentityId
+    mcpIdentityClientId: identity.outputs.mcpIdentityClientId
+    tenantId: subscription().tenantId
+    mcpAppClientId: intakeMcpAppClientId
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    logAnalyticsWorkspaceCustomerId: monitoring.outputs.logAnalyticsCustomerId
+    logAnalyticsSharedKey: monitoring.outputs.logAnalyticsSharedKey
+    cosmosEndpoint: cosmos.outputs.endpoint
+    cosmosDatabase: cosmos.outputs.databaseName
+    cosmosRequestsContainer: cosmos.outputs.requestsContainerName
+    cosmosTemplatesContainer: cosmos.outputs.templatesContainerName
+    cosmosIdempotencyContainer: cosmos.outputs.idempotencyContainerName
+    serviceBusNamespace: servicebus.outputs.namespaceFqdn
+    serviceBusQueue: servicebus.outputs.queueName
+    blobEndpoint: storage.outputs.blobEndpoint
+    artifactsContainer: storage.outputs.artifactsContainer
+    environmentNameTag: environmentName
+  }
+  dependsOn: [
+    mcpAcrPull
+  ]
+}
+
+module mcpPrivateDns 'modules/mcp-private-dns.bicep' = {
+  name: 'mcpPrivateDns'
+  params: {
+    tags: tags
+    defaultDomain: mcpRuntime.outputs.environmentDefaultDomain
+    staticIp: mcpRuntime.outputs.environmentStaticIp
+    vnetId: network.outputs.vnetId
+    linkName: 'link-${vnetName}'
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +223,7 @@ module storage 'modules/storage.bicep' = {
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
     evalIdentityPrincipalId: identity.outputs.evalIdentityPrincipalId
     functionsMIPrincipalId: identity.outputs.workerIdentityPrincipalId
+    mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId
     functionsSubnetId: functionsSubnetId
   }
   dependsOn: [network]
@@ -157,6 +242,7 @@ module cosmos 'modules/cosmos.bicep' = {
     deployPrivateEndpoints: deployPrivateEndpoints
     agentIdentityPrincipalId: identity.outputs.agentIdentityPrincipalId
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
+    mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId
   }
 }
 
@@ -339,6 +425,7 @@ output AGENT_IDENTITY_CLIENT_ID string = identity.outputs.agentIdentityClientId
 output WORKER_IDENTITY_CLIENT_ID string = identity.outputs.workerIdentityClientId
 output EVAL_IDENTITY_CLIENT_ID string = identity.outputs.evalIdentityClientId
 output AGENT_RUNTIME_PRINCIPAL_ID string = identity.outputs.agentIdentityPrincipalId
+output MCP_IDENTITY_CLIENT_ID string = identity.outputs.mcpIdentityClientId
 
 output AZURE_FOUNDRY_HUB_NAME string = foundry.outputs.accountName
 output AZURE_FOUNDRY_PROJECT_NAME string = foundry.outputs.projectName
@@ -349,3 +436,9 @@ output AZURE_AI_PROJECT_ID string = foundry.outputs.projectId
 output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output FOUNDRY_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName
+
+output INTAKE_MCP_APP_NAME string = mcpRuntime.outputs.appName
+output INTAKE_MCP_SERVER_URL string = mcpRuntime.outputs.serverUrl
+output INTAKE_MCP_AUDIENCE string = mcpRuntime.outputs.audience
+output INTAKE_MCP_CONNECTION_NAME string = 'prompt-intake-user'
+output INTAKE_MCP_IMAGE string = intakeMcpImage

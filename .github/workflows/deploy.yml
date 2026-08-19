@@ -39,6 +39,7 @@
 #     AZURE_ENV_NAME         — azd environment name (must be dev)
 #     AZURE_LOCATION         — Azure region (e.g. eastus2)
 #     AZURE_PRINCIPAL_ID     — Object ID of the federated service principal
+#     INTAKE_MCP_APP_CLIENT_ID — Client ID created by bootstrap-prompt-intake-auth
 #
 #   Secrets: none in GitHub — OIDC federation removes the need for a stored
 #   Azure credential, and the GitHub runner-registration PAT lives ONLY as
@@ -151,6 +152,18 @@ jobs:
             exit 1
           fi
           git checkout --quiet --detach "${REQUESTED_REF}"
+          required_prompt_paths=(
+            agents/prompt-intake-agent/agent.json
+            infra/modules/mcp-container-apps.bicep
+            scripts/foundry/deploy_prompt_agent.py
+            src/intake_mcp/main.py
+          )
+          for required_path in "${required_prompt_paths[@]}"; do
+            if [[ ! -f "${required_path}" ]]; then
+              echo "::error::${REQUESTED_REF} predates the prompt-agent deployment contract (${required_path} missing)"
+              exit 1
+            fi
+          done
           echo "Deploying CI-verified main ancestor ${REQUESTED_REF}"
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -210,6 +223,80 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_PRINCIPAL_ID: ${{ vars.AZURE_PRINCIPAL_ID }}
 
+      - name: Build private prompt intake MCP image
+        id: mcp-image
+        run: |
+          set -euo pipefail
+          : "${INTAKE_MCP_APP_CLIENT_ID:?Repository or dev Environment variable INTAKE_MCP_APP_CLIENT_ID is required}"
+          ACR_NAME="$(
+           az acr list \
+             --resource-group rg-intake-dev \
+             --subscription "${AZURE_SUBSCRIPTION_ID}" \
+             --query "[?tags.'azd-env-name'=='${AZURE_ENV_NAME}'].name | [0]" \
+             --output tsv
+          )"
+          if [[ -z "${ACR_NAME}" ]]; then
+           echo "::error::Private runner ACR is not bootstrapped"
+           exit 1
+          fi
+          ACR_LOGIN_SERVER="$(
+           az acr show \
+             --name "${ACR_NAME}" \
+             --resource-group rg-intake-dev \
+             --query loginServer \
+             --output tsv
+          )"
+          restore_acr_public_access() {
+            if [[ "${ACR_PUBLIC_ACCESS_BEFORE:-}" == "Disabled" ]]; then
+             az acr update \
+               --name "${ACR_NAME}" \
+               --resource-group rg-intake-dev \
+               --public-network-enabled false \
+               --only-show-errors >/dev/null
+            fi
+          }
+          ACR_PUBLIC_ACCESS_BEFORE="$(
+            az acr show \
+             --name "${ACR_NAME}" \
+             --resource-group rg-intake-dev \
+             --query publicNetworkAccess \
+             --output tsv
+          )"
+          trap restore_acr_public_access EXIT INT TERM
+          if [[ "${ACR_PUBLIC_ACCESS_BEFORE}" == "Disabled" ]]; then
+            az acr update \
+             --name "${ACR_NAME}" \
+             --resource-group rg-intake-dev \
+             --public-network-enabled true \
+             --only-show-errors >/dev/null
+          fi
+          DEPLOY_SHA="$(git rev-parse HEAD)"
+          az acr build \
+           --registry "${ACR_NAME}" \
+           --resource-group rg-intake-dev \
+           --image "prompt-intake-mcp:${DEPLOY_SHA}" \
+           --file src/intake_mcp/Dockerfile .
+          IMAGE_DIGEST="$(
+           az acr repository show \
+             --name "${ACR_NAME}" \
+             --image "prompt-intake-mcp:${DEPLOY_SHA}" \
+             --query digest \
+             --output tsv
+          )"
+          IMAGE="${ACR_LOGIN_SERVER}/prompt-intake-mcp@${IMAGE_DIGEST}"
+          restore_acr_public_access
+          trap - EXIT INT TERM
+          azd env set INTAKE_MCP_APP_CLIENT_ID "${INTAKE_MCP_APP_CLIENT_ID}"
+          azd env set INTAKE_MCP_IMAGE "${IMAGE}"
+          echo "INTAKE_MCP_IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          echo "INTAKE_MCP_APP_CLIENT_ID=${INTAKE_MCP_APP_CLIENT_ID}" >> "${GITHUB_ENV}"
+          echo "INTAKE_MCP_ACR_NAME=${ACR_NAME}" >> "${GITHUB_ENV}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          INTAKE_MCP_APP_CLIENT_ID: ${{ vars.INTAKE_MCP_APP_CLIENT_ID }}
+
       # What-if before provisioning. Parameters mirror main.parameters.json
       # exactly (scripts/azure/what-if.sh no longer diverges from the real
       # provision inputs — see that script's header comment). Blocking: a
@@ -223,6 +310,8 @@ jobs:
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_RESOURCE_GROUP: rg-intake-dev
           AZURE_PRINCIPAL_ID: ${{ vars.AZURE_PRINCIPAL_ID }}
+          INTAKE_MCP_APP_CLIENT_ID: ${{ vars.INTAKE_MCP_APP_CLIENT_ID }}
+          INTAKE_MCP_IMAGE: ${{ steps.mcp-image.outputs.image }}
 
       - name: Upload what-if evidence
         if: always()
@@ -251,6 +340,45 @@ jobs:
           AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Python for prompt agent deployment
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install prompt agent deployment dependencies
+        run: python -m pip install .
+
+      - name: Configure delegated MCP connection
+        run: |
+          set -euo pipefail
+          PROJECT_ENDPOINT="$(azd env get-value AZURE_AI_PROJECT_ENDPOINT --no-prompt)"
+          MCP_URL="$(azd env get-value INTAKE_MCP_SERVER_URL --no-prompt)"
+          MCP_AUDIENCE="$(azd env get-value INTAKE_MCP_AUDIENCE --no-prompt)"
+          MCP_CONNECTION="$(azd env get-value INTAKE_MCP_CONNECTION_NAME --no-prompt)"
+          azd ai connection create "${MCP_CONNECTION}" \
+            --project-endpoint "${PROJECT_ENDPOINT}" \
+            --kind remote-tool \
+            --target "${MCP_URL}" \
+            --auth-type user-entra-token \
+            --audience "${MCP_AUDIENCE}" \
+            --force \
+            --no-prompt
+
+      - name: Deploy prompt intake agent
+        run: |
+          set -euo pipefail
+          export AZURE_AI_PROJECT_ENDPOINT
+          export AZURE_AI_MODEL_DEPLOYMENT_NAME
+          export INTAKE_MCP_SERVER_URL
+          export INTAKE_MCP_CONNECTION_NAME
+          AZURE_AI_PROJECT_ENDPOINT="$(azd env get-value AZURE_AI_PROJECT_ENDPOINT --no-prompt)"
+          AZURE_AI_MODEL_DEPLOYMENT_NAME="$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME --no-prompt)"
+          INTAKE_MCP_SERVER_URL="$(azd env get-value INTAKE_MCP_SERVER_URL --no-prompt)"
+          INTAKE_MCP_CONNECTION_NAME="$(azd env get-value INTAKE_MCP_CONNECTION_NAME --no-prompt)"
+          PROMPT_INTAKE_EVAL_OUT=prompt-agent-eval.yaml \
+            python scripts/foundry/deploy_prompt_agent.py | tee prompt-agent-deploy.json
 
       # Post-deploy verification is BLOCKING (no continue-on-error): a failed
       # smoke check means the deployment did not actually work and the run
@@ -284,6 +412,17 @@ jobs:
         with:
           name: post-deploy-verify-${{ vars.AZURE_ENV_NAME }}
           path: post-deploy-verify.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload prompt agent deployment evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: prompt-agent-deploy-${{ vars.AZURE_ENV_NAME }}
+          path: |
+            prompt-agent-deploy.json
+            prompt-agent-eval.yaml
           if-no-files-found: warn
           retention-days: 30
 

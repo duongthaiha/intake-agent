@@ -118,7 +118,7 @@ fi
 
 section "Application and identities"
 check "Function App is Running" test "$(az functionapp show -g "$RESOURCE_GROUP" -n "func-intake-${ENV_NAME}" --query state -o tsv)" = Running
-for identity in agent worker eval notify runner; do
+for identity in agent worker eval notify runner mcp; do
   check "Managed identity id-intake-${identity}-${ENV_NAME}" \
     az identity show -g "$RESOURCE_GROUP" -n "id-intake-${identity}-${ENV_NAME}"
 done
@@ -172,6 +172,71 @@ fi
 
 if [[ -n "$FOUNDRY_NAME" ]]; then
   check "Foundry public access disabled" test "$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$FOUNDRY_NAME" --query properties.publicNetworkAccess -o tsv)" = Disabled
+fi
+
+section "Prompt Agent and private MCP path"
+MCP_APP="$(azd_env_value INTAKE_MCP_APP_NAME)"
+MCP_URL="$(azd_env_value INTAKE_MCP_SERVER_URL)"
+MCP_CONNECTION="$(azd_env_value INTAKE_MCP_CONNECTION_NAME)"
+MCP_MODEL="$(azd_env_value AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+
+if [[ -n "$MCP_APP" ]]; then
+  check "Prompt intake MCP Container App exists" \
+    az containerapp show -g "$RESOURCE_GROUP" -n "$MCP_APP"
+  MCP_ENV_ID="$(az containerapp show -g "$RESOURCE_GROUP" -n "$MCP_APP" --query properties.environmentId -o tsv 2>/dev/null || true)"
+  MCP_ENV_NAME="${MCP_ENV_ID##*/}"
+  if [[ -n "$MCP_ENV_NAME" ]]; then
+    check "Prompt intake MCP environment is internal" \
+      test "$(az containerapp env show -g "$RESOURCE_GROUP" -n "$MCP_ENV_NAME" --query properties.vnetConfiguration.internal -o tsv)" = true
+  else
+    fail "Prompt intake MCP environment could not be resolved"
+  fi
+else
+  fail "INTAKE_MCP_APP_NAME unavailable from azd outputs"
+fi
+
+if [[ "$MCP_URL" =~ ^https:// ]]; then
+  MCP_HOST="$(printf '%s' "$MCP_URL" | sed -E 's#^https?://([^/]+).*$#\1#')"
+  MCP_BASE="${MCP_URL%/mcp}"
+  MCP_IP="$(getent hosts "$MCP_HOST" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
+  if [[ -z "$MCP_IP" ]]; then
+    MCP_IP="$(python3 -c 'import socket,sys; print(socket.gethostbyname(sys.argv[1]))' "$MCP_HOST" 2>/dev/null || true)"
+  fi
+  if private_ip "$MCP_IP"; then
+    pass "Prompt intake MCP private DNS: $MCP_HOST -> $MCP_IP"
+  else
+    fail "Prompt intake MCP DNS is not RFC1918: ${MCP_IP:-no answer}"
+  fi
+  check "Prompt intake MCP health responds" \
+    curl --fail --silent --show-error --max-time 15 "${MCP_BASE}/health"
+  MCP_UNAUTH_CODE="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 15 "$MCP_URL" 2>/dev/null || true)"
+  if [[ "$MCP_UNAUTH_CODE" == "401" ]]; then
+    pass "Prompt intake MCP rejects unauthenticated calls"
+  else
+    fail "Prompt intake MCP unauthenticated status: ${MCP_UNAUTH_CODE:-unavailable}"
+  fi
+else
+  fail "INTAKE_MCP_SERVER_URL unavailable from azd outputs"
+fi
+
+if [[ -n "$MCP_CONNECTION" && -n "$PROJECT_ENDPOINT" ]]; then
+  check "Delegated MCP project connection exists" \
+    azd ai connection show "$MCP_CONNECTION" \
+      --project-endpoint "$PROJECT_ENDPOINT" --no-prompt --output json
+else
+  fail "Prompt intake MCP connection inputs unavailable"
+fi
+
+if PROMPT_JSON="$(
+  python scripts/foundry/verify_prompt_agent.py \
+    --project-endpoint "$PROJECT_ENDPOINT" \
+    --model "$MCP_MODEL" \
+    --server-url "$MCP_URL" \
+    --connection-name "$MCP_CONNECTION" 2>&1
+)"; then
+  pass "Prompt Agent definition verified"
+else
+  fail "Prompt Agent verification failed: $PROMPT_JSON"
 fi
 
 echo; echo "━━━ Post-Deploy Verification Summary ━━━"; echo "  Passed: $PASS"; echo "  Failed: $FAIL"

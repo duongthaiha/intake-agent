@@ -1030,17 +1030,35 @@ def test_what_if_passes_no_removed_parameters() -> None:
     )
 
 
-def test_bootstrap_bicep_always_creates_the_private_runner_registry() -> None:
+def test_bootstrap_bicep_restores_the_private_runner_registry() -> None:
     text = _read(BOOTSTRAP_BICEP_PATH)
     assert not re.search(r"^param\s+deployPrivateEndpoints\b", text, re.MULTILINE), (
         "The runner ACR is private-only; there is no supported public fallback"
     )
     assert re.search(
-        r"module runnerAcrPrivateEndpoint 'modules/runner-acr-private-endpoint\.bicep' = \{",
+        (
+            r"module runnerAcrPrivateEndpoint "
+            r"'modules/runner-acr-private-endpoint\.bicep' = "
+            r"if \(deployAcrPrivateEndpoint\) \{"
+        ),
         text,
-    ), "The ACR private endpoint must be unconditional"
+    ), "The private endpoint may be deferred only for the first bootstrap build"
     assert "deployPrivateEndpoints: true" in text
-    assert "acrAllowPublicNetworkAccessForBootstrap: false" in text
+    assert "param deployAcrPrivateEndpoint bool = true" in text
+    assert "param acrAllowPublicNetworkAccessForBootstrap bool = false" in text
+
+    script = _read(BOOTSTRAP_SCRIPT_PATH)
+    assert (
+        "deployAcrPrivateEndpoint=false "
+        "acrAllowPublicNetworkAccessForBootstrap=true"
+    ) in script
+    assert (
+        "deployAcrPrivateEndpoint=true "
+        "acrAllowPublicNetworkAccessForBootstrap=false"
+    ) in script
+    assert "trap restore_acr_public_access EXIT INT TERM" in script
+    assert "azd provision --environment \"$ENV_NAME\" --no-prompt" in script
+    assert "github-actions-runner@${RUNNER_IMAGE_DIGEST}" in script
 
 
 def test_data_plane_acls_stay_deny_by_default() -> None:

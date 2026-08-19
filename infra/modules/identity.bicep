@@ -33,6 +33,12 @@ resource notifyIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-0
   tags: tags
 }
 
+resource mcpIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-intake-mcp-${environmentName}'
+  location: location
+  tags: tags
+}
+
 // ---------------------------------------------------------------------------
 // Outputs
 // ---------------------------------------------------------------------------
@@ -52,3 +58,7 @@ output evalIdentityClientId string = evalIdentity.properties.clientId
 output notifyIdentityId string = notifyIdentity.id
 output notifyIdentityPrincipalId string = notifyIdentity.properties.principalId
 output notifyIdentityClientId string = notifyIdentity.properties.clientId
+
+output mcpIdentityId string = mcpIdentity.id
+output mcpIdentityPrincipalId string = mcpIdentity.properties.principalId
+output mcpIdentityClientId string = mcpIdentity.properties.clientId

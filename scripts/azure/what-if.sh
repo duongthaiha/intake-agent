@@ -39,6 +39,8 @@ if [[ -z "$SUBSCRIPTION" ]]; then
 fi
 
 : "${AZURE_PRINCIPAL_ID:?AZURE_PRINCIPAL_ID is required (federated service principal object ID)}"
+: "${INTAKE_MCP_APP_CLIENT_ID:?INTAKE_MCP_APP_CLIENT_ID is required}"
+: "${INTAKE_MCP_IMAGE:?INTAKE_MCP_IMAGE is required}"
 
 echo "━━━ Bicep What-If ━━━"
 echo "  Environment:  $ENV_NAME"
@@ -59,6 +61,8 @@ az deployment group what-if \
   --parameters environmentName="$ENV_NAME" \
                location="$LOCATION" \
                principalId="$AZURE_PRINCIPAL_ID" \
+               intakeMcpAppClientId="$INTAKE_MCP_APP_CLIENT_ID" \
+               intakeMcpImage="$INTAKE_MCP_IMAGE" \
                deployBotService=false \
   --result-format FullResourcePayloads \
   --exclude-change-types Ignore Unsupported NoChange \

@@ -3,7 +3,7 @@
 Covers three scenarios mandated by the SECURITY CONTRACT in local.py:
 
   A. Configured reviewer ID → receives frozenset(["reviewer"]) → domain approves.
-  B. Unlisted ID → receives frozenset(["requester"]) → domain raises AuthorizationDeniedError.
+  B. Unlisted ID → receives frozenset(["requester"]) → domain hides the request.
   C. Non-local environment (dev/test/prod) → raises AuthorizationDeniedError *immediately*,
      before any domain logic, even for a valid reviewer ID.
 
@@ -15,7 +15,7 @@ import pytest
 
 from intake_agent.adapter.local import LocalAdapter, _resolve_local_dev_actor
 from intake_agent.config import IntakeSettings, build_repositories
-from intake_domain.errors import AuthorizationDeniedError
+from intake_domain.errors import AuthorizationDeniedError, NotFoundError
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -122,19 +122,19 @@ def test_unlisted_id_resolves_requester_role():
 
 
 @pytest.mark.asyncio
-async def test_unlisted_id_raises_authorization_denied_on_review():
-    """Attempting record_review_decision with an unlisted ID raises AuthorizationDeniedError."""
+async def test_unlisted_id_cannot_discover_request_on_review():
+    """An unlisted requester receives NotFound rather than request disclosure."""
     settings = _settings()
     adapter = _adapter(settings)
 
     rid, rev = await _submit_request(adapter)
 
-    with pytest.raises(AuthorizationDeniedError) as exc_info:
+    with pytest.raises(NotFoundError) as exc_info:
         await adapter.record_review_decision(
             rid, rev, "approve", "I should be denied.", reviewer_id="intruder"
         )
     err = exc_info.value
-    assert err.error_code == "AUTHORIZATION_DENIED"
+    assert err.error_code == "NOT_FOUND"
     assert err.retry_eligible is False
 
 
@@ -146,7 +146,7 @@ async def test_unlisted_id_cannot_reject_either():
 
     rid, rev = await _submit_request(adapter)
 
-    with pytest.raises(AuthorizationDeniedError):
+    with pytest.raises(NotFoundError):
         await adapter.record_review_decision(
             rid, rev, "reject", "Sneaky reject.", reviewer_id="intruder"
         )

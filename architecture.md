@@ -12,6 +12,13 @@ The central design rule is:
 
 A Python Hosted Agent is deployed as a modular monolith. Its model-facing orchestration layer coordinates the conversation, while internal application and domain layers own templates, validation rules, lifecycle transitions, request-level authorization, approvals, idempotency, persistence, and audit history. These deterministic layers run in the same Hosted Agent process but cannot be bypassed by model-generated tool arguments. Azure Cosmos DB stores request data, Azure Blob Storage stores generated artifacts, Azure Service Bus decouples background work, and Azure Functions process documents, notifications, evaluations, and downstream deliveries.
 
+A project-level Prompt Agent is also deployed as a side-by-side comparison
+surface. It contains no custom agent code and reaches the same deterministic
+application through a private, Entra-protected MCP service on Azure Container
+Apps. The Hosted Agent remains the production baseline. The prompt path is an
+additive trust boundary used to compare declarative-agent behavior without
+moving authorization or business rules into the prompt.
+
 ## 2. Scope
 
 ### 2.1 In scope
@@ -116,7 +123,12 @@ flowchart LR
         subgraph Foundry["Microsoft Foundry"]
             App[Agent Application<br/>Activity Protocol]
             Agent[Python Hosted Intake Agent]
+            Prompt[Prompt Intake Agent]
             Eval[Foundry tracing and evaluation]
+        end
+
+        subgraph PromptToolPlane["Private prompt tool plane"]
+            MCP[Internal Container Apps MCP service]
         end
 
         subgraph AppPlane["Asynchronous application plane"]
@@ -142,6 +154,9 @@ flowchart LR
     Teams <--> Bot
     Bot <--> App
     App --> Agent
+    Prompt -->|Delegated user token| MCP
+    MCP <--> Cosmos
+    MCP --> Blob
     Agent -->|Foundry-managed search tool| Search
     Agent <--> Cosmos
     Agent --> Bus
@@ -156,6 +171,7 @@ flowchart LR
     Workers --> Vault
     Agent --> Eval
     Agent --> Monitor
+    MCP --> Monitor
     Workers --> Monitor
     Eval --> Monitor
 ```
@@ -1035,6 +1051,7 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | ADR-009 | Extract a Core service only for additional consumers, materially different scaling/release needs, or a required process trust boundary | Accepted |
 | ADR-010 | Build the deterministic core as a private `intake-domain` package bundled into the Hosted Agent and state-changing workers | Accepted |
 | ADR-011 | Use Bicep as the infrastructure source of truth and Azure Developer CLI (`azd`) as the shared local and CI/CD deployment contract | Accepted |
+| ADR-015 | Add a side-by-side Prompt Agent through a private delegated-identity MCP boundary without replacing the Hosted Agent | Accepted |
 
 ## 22. Risks and mitigations
 
@@ -1048,6 +1065,9 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | Conversation state diverges from business state | Incorrect resume or decisions | Treat the persisted request aggregate as source of truth and reload it on every turn |
 | Combined Hosted Agent becomes tightly coupled | Harder future extraction or testing | Enforce orchestration, command, domain, and repository module boundaries and prevent inward dependencies on Foundry types |
 | Hosted Agent and workers use different domain versions | State invariants or event schemas diverge | Build once, promote package versions together, record versions in telemetry, and test any compatibility window |
+| Prompt MCP request IDs become insecure direct object references | Cross-user or cross-tenant read/write | Enforce tenant and requester ownership in shared handlers before reads, writes, reviews, or idempotent replay |
+| Delegated OAuth consent cannot run noninteractively in CI | Automated smoke tests cannot prove user isolation | Keep structural checks automated and require a documented two-user live acceptance gate |
+| Hosted and prompt identity namespaces differ | Cross-surface request continuity is unavailable | Treat request sets as intentionally separate until a verified identity-linking design is approved |
 | Teams/Microsoft 365 processing conflicts with residency policy | Compliance block | Complete data-flow and governance review before tenant-wide publishing |
 | Sensitive data enters traces or evaluation data | Privacy incident | Default redaction, restricted traces, dataset approval, automated scanning |
 | Review notifications cannot be sent reliably | Slow workflow | Validate Graph activity-feed notifications early; provide an in-agent pending-review list, retries, dead-letter alerting, and operator recovery |

@@ -1,0 +1,14 @@
+name: prompt-intake-agent-essential-acceptance
+agent:
+  name: prompt-intake-agent
+  kind: prompt
+  version: "__AGENT_VERSION__"
+  model: gpt-5-nano
+dataset:
+  local_uri: evaluation/dataset/foundry_smoke.jsonl
+evaluators:
+  - builtin.task_adherence
+  - builtin.intent_resolution
+  - builtin.indirect_attack
+options:
+  eval_model: gpt-5-nano

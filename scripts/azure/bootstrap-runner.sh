@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bootstrap the private runner outside azd provision. Stages are idempotent:
-# foundation, image build/push, then ACA Job creation/secret rotation.
+# registry, image build/push, application foundation, then ACA Job creation.
 # A private ACR needs temporary public access or a dedicated private build pool
 # for the first push. This script uses the former and restores it with a trap.
 #
@@ -25,6 +25,8 @@
 #   RUNNER_SHA256             — override the pinned actions-runner digest only
 #                               when intentionally moving off the default
 #                               (see scripts/azure/runner/Dockerfile).
+#   INTAKE_MCP_APP_CLIENT_ID  — required for a full bootstrap; produced by
+#                               bootstrap-prompt-intake-auth.sh
 
 set -euo pipefail
 
@@ -32,6 +34,7 @@ ENV_NAME="${AZURE_ENV_NAME:-dev}"
 LOCATION="${AZURE_LOCATION:-eastus2}"
 RESOURCE_GROUP="${AZURE_RESOURCE_GROUP:-rg-intake-${ENV_NAME}}"
 IMAGE_TAG="runner-$(git rev-parse --short=12 HEAD)"
+MCP_IMAGE_TAG="mcp-$(git rev-parse --short=12 HEAD)"
 SKIP_IMAGE_BUILD=false
 
 while [[ $# -gt 0 ]]; do
@@ -49,13 +52,23 @@ command -v azd >/dev/null || { echo "azd is required." >&2; exit 1; }
 : "${GITHUB_REPOSITORY_OWNER:?GITHUB_REPOSITORY_OWNER is required}"
 : "${GITHUB_REPOSITORY_NAME:?GITHUB_REPOSITORY_NAME is required}"
 : "${GITHUB_RUNNER_PAT:?GITHUB_RUNNER_PAT must be a fine-grained, repository-scoped PAT}"
+if [[ "$SKIP_IMAGE_BUILD" == "false" ]]; then
+  : "${INTAKE_MCP_APP_CLIENT_ID:?INTAKE_MCP_APP_CLIENT_ID is required for full bootstrap}"
+  if ! az group show \
+    --name "$RESOURCE_GROUP" \
+    --subscription "$AZURE_SUBSCRIPTION_ID" >/dev/null 2>&1; then
+    echo "Resource group '$RESOURCE_GROUP' must exist before bootstrap." >&2
+    echo "Create it through the approved subscription-level process, then retry." >&2
+    exit 1
+  fi
+fi
 
 log() { echo "[bootstrap-runner] $*"; }
 DEPLOYMENT_NAME="runner-bootstrap-${ENV_NAME}"
 PLACEHOLDER_IMAGE="bootstrap.invalid/runner:unused"
 
 # ---------------------------------------------------------------------------
-# Stage 1 — application foundation (full bootstrap only)
+# Stage 1 — seed environment and create the registry (full bootstrap only)
 #
 # `azd provision` below needs both an azd environment that already carries the
 # subscription/location/resource-group/principal values (nothing else seeds
@@ -63,7 +76,7 @@ PLACEHOLDER_IMAGE="bootstrap.invalid/runner:unused"
 # extension (the template provisions Foundry unconditionally).
 # ---------------------------------------------------------------------------
 if [[ "$SKIP_IMAGE_BUILD" == "false" ]]; then
-  log "Stage 1/3: seeding the azd environment '${ENV_NAME}'"
+  log "Stage 1/4: seeding the azd environment '${ENV_NAME}'"
   azd env select "$ENV_NAME" 2>/dev/null || azd env new "$ENV_NAME" --no-prompt
   azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID" --environment "$ENV_NAME"
   azd env set AZURE_LOCATION "$LOCATION" --environment "$ENV_NAME"
@@ -73,13 +86,10 @@ if [[ "$SKIP_IMAGE_BUILD" == "false" ]]; then
   # Meta-package that bundles the Foundry azd extensions (`azd ai agent ...`
   # and the azure.ai.* extensions azure.yaml declares in requiredVersions).
   # `--force` makes the install idempotent when it is already present.
-  log "Stage 1/3: ensuring the microsoft.foundry azd extension is installed"
+  log "Stage 1/4: ensuring the microsoft.foundry azd extension is installed"
   azd ext install microsoft.foundry --force
 
-  log "Stage 1/3: provisioning the application foundation without runner infrastructure"
-  azd provision --environment "$ENV_NAME" --no-prompt
-
-  log "Stage 1/3: creating runner identity, private ACR, and private endpoint"
+  log "Stage 1/4: creating the runner identity and bootstrap-accessible ACR"
   az deployment group create \
     --resource-group "$RESOURCE_GROUP" \
     --subscription "$AZURE_SUBSCRIPTION_ID" \
@@ -88,6 +98,7 @@ if [[ "$SKIP_IMAGE_BUILD" == "false" ]]; then
     --parameters environmentName="$ENV_NAME" location="$LOCATION" \
                  githubRepoOwner="$GITHUB_REPOSITORY_OWNER" githubRepoName="$GITHUB_REPOSITORY_NAME" \
                  runnerImage="$PLACEHOLDER_IMAGE" githubPat='' deployRunnerJob=false \
+                 deployAcrPrivateEndpoint=false acrAllowPublicNetworkAccessForBootstrap=true \
     --only-show-errors >/dev/null
 else
   log "Stage 1/3: skipping azd provision — PAT rotation must not reprovision the application foundation"
@@ -113,39 +124,63 @@ else
 fi
 
 restore_acr_public_access() {
-  if [[ "${ACR_PUBLIC_ACCESS_BEFORE:-}" == "Disabled" ]]; then
+  if [[ -n "${ACR_NAME:-}" ]]; then
     log "Restoring ACR public network access to Disabled"
     az acr update --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --public-network-enabled false --only-show-errors >/dev/null
   fi
 }
 
 if [[ "$SKIP_IMAGE_BUILD" == "false" ]]; then
-  ACR_PUBLIC_ACCESS_BEFORE="$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query publicNetworkAccess -o tsv)"
   trap restore_acr_public_access EXIT INT TERM
-  if [[ "$ACR_PUBLIC_ACCESS_BEFORE" == "Disabled" ]]; then
-    log "Stage 2/3: temporarily enabling ACR public access for the documented bootstrap build path"
+  ACR_PUBLIC_ACCESS="$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query publicNetworkAccess -o tsv)"
+  if [[ "$ACR_PUBLIC_ACCESS" == "Disabled" ]]; then
+    log "Stage 2/4: temporarily enabling ACR public access for the documented bootstrap build path"
     az acr update --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --public-network-enabled true --only-show-errors >/dev/null
   fi
-  log "Stage 2/3: building and pushing ${IMAGE_REF}"
+  log "Stage 2/4: building and pushing ${IMAGE_REF}"
   # RUNNER_SHA256 defaults to the verified v2.336.0 release digest baked into
   # the Dockerfile; it is passed through only when an operator has explicitly
   # reviewed and exported an override.
   BUILD_ARGS=()
   if [[ -n "${RUNNER_SHA256:-}" ]]; then
-    log "Stage 2/3: using an explicit RUNNER_SHA256 override"
+    log "Stage 2/4: using an explicit RUNNER_SHA256 override"
     BUILD_ARGS+=(--build-arg "RUNNER_SHA256=${RUNNER_SHA256}")
   fi
   az acr build --registry "$ACR_NAME" --resource-group "$RESOURCE_GROUP" \
     --image "github-actions-runner:${IMAGE_TAG}" \
     "${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}" \
     --file scripts/azure/runner/Dockerfile scripts/azure/runner
-  restore_acr_public_access
-  trap - EXIT INT TERM
+  RUNNER_IMAGE_DIGEST="$(
+    az acr repository show \
+     --name "$ACR_NAME" \
+     --image "github-actions-runner:${IMAGE_TAG}" \
+     --query digest \
+     --output tsv
+  )"
+  IMAGE_REF="${ACR_LOGIN_SERVER}/github-actions-runner@${RUNNER_IMAGE_DIGEST}"
+
+  log "Stage 2/4: building prompt-intake-mcp:${MCP_IMAGE_TAG}"
+  az acr build --registry "$ACR_NAME" --resource-group "$RESOURCE_GROUP" \
+    --image "prompt-intake-mcp:${MCP_IMAGE_TAG}" \
+    --file src/intake_mcp/Dockerfile .
+  MCP_IMAGE_DIGEST="$(
+    az acr repository show \
+      --name "$ACR_NAME" \
+      --image "prompt-intake-mcp:${MCP_IMAGE_TAG}" \
+      --query digest \
+      --output tsv
+  )"
+  MCP_IMAGE_REF="${ACR_LOGIN_SERVER}/prompt-intake-mcp@${MCP_IMAGE_DIGEST}"
+
+  log "Stage 3/4: provisioning the application foundation and private MCP runtime"
+  azd env set INTAKE_MCP_APP_CLIENT_ID "$INTAKE_MCP_APP_CLIENT_ID" --environment "$ENV_NAME"
+  azd env set INTAKE_MCP_IMAGE "$MCP_IMAGE_REF" --environment "$ENV_NAME"
+  azd provision --environment "$ENV_NAME" --no-prompt
 else
-  log "Stage 2/3: skipping image build; rotating the job secret only"
+  log "Stage 2/4: skipping image build and application provision; rotating the job secret only"
 fi
 
-log "Stage 3/3: creating/updating the event-driven runner job with a direct ACA secret"
+log "Stage 4/4: creating the private endpoint and event-driven runner job"
 az deployment group create \
   --resource-group "$RESOURCE_GROUP" \
   --subscription "$AZURE_SUBSCRIPTION_ID" \
@@ -154,7 +189,10 @@ az deployment group create \
   --parameters environmentName="$ENV_NAME" location="$LOCATION" \
                githubRepoOwner="$GITHUB_REPOSITORY_OWNER" githubRepoName="$GITHUB_REPOSITORY_NAME" \
                runnerImage="$IMAGE_REF" githubPat="$GITHUB_RUNNER_PAT" deployRunnerJob=true \
+               deployAcrPrivateEndpoint=true acrAllowPublicNetworkAccessForBootstrap=false \
   --only-show-errors >/dev/null
+restore_acr_public_access
+trap - EXIT INT TERM
 unset GITHUB_RUNNER_PAT
 
 log "Bootstrap complete. The private runner job uses ${IMAGE_REF}."

@@ -19,7 +19,7 @@ def test_eval_config_targets_local_hosted_agent_intent() -> None:
             r"(?m)^agent:\s*\n"
             r"\s+name: intake-agent\s*\n"
             r"\s+kind: hosted\s*\n"
-            r'\s+version: "8"\s*\n'
+            r'\s+version: "9"\s*\n'
             r"\s+model: gpt-5-nano$"
         ),
         config,
@@ -54,6 +54,6 @@ def test_eval_config_contains_no_unverified_remote_references() -> None:
     ):
         assert remote_only_key not in config
 
-    assert 'version: "8"' in config
+    assert 'version: "9"' in config
     dataset_path = ROOT / "evaluation" / "dataset" / "foundry_smoke.jsonl"
     assert dataset_path.is_file()

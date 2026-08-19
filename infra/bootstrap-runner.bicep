@@ -25,6 +25,8 @@ param githubPat string
 
 @description('Creates or updates the event-driven job only after a real image and PAT are available.')
 param deployRunnerJob bool = false
+param deployAcrPrivateEndpoint bool = true
+param acrAllowPublicNetworkAccessForBootstrap bool = false
 
 // The dev architecture is private-only: the runner registry is reachable
 // exclusively through its private endpoint, and the runner is the sole path
@@ -64,12 +66,12 @@ module runnerAcr 'modules/runner-acr.bicep' = {
     tags: tags
     acrName: acrName
     deployPrivateEndpoints: true
-    acrAllowPublicNetworkAccessForBootstrap: false
+    acrAllowPublicNetworkAccessForBootstrap: acrAllowPublicNetworkAccessForBootstrap
     runnerIdentityPrincipalId: runnerIdentity.outputs.principalId
   }
 }
 
-module runnerAcrPrivateEndpoint 'modules/runner-acr-private-endpoint.bicep' = {
+module runnerAcrPrivateEndpoint 'modules/runner-acr-private-endpoint.bicep' = if (deployAcrPrivateEndpoint) {
   name: 'runnerAcrPrivateEndpoint'
   params: {
     location: location

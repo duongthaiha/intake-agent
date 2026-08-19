@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "16839358743637982199"
+      "templateHash": "4687212814611089447"
     }
   },
   "parameters": {
@@ -45,6 +45,20 @@
         "description": "Override region for AI Search service only. eastus2 has been observed to have InsufficientResourcesAvailable for new AI Search services; set to eastus as fallback."
       }
     },
+    "intakeMcpAppClientId": {
+      "type": "string",
+      "minLength": 1,
+      "metadata": {
+        "description": "Client ID of the secretless Entra application protecting the prompt intake MCP API."
+      }
+    },
+    "intakeMcpImage": {
+      "type": "string",
+      "minLength": 1,
+      "metadata": {
+        "description": "Immutable private ACR image reference for the prompt intake MCP service."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -59,6 +73,9 @@
     }
   },
   "variables": {
+    "acrPullRoleId": "7f951dda-4ed3-4680-a7ca-43fe172d538d",
+    "acrPushRoleId": "8311e382-0749-4cb8-b61a-304f252e45ec",
+    "mcpIdentityResourceId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-intake-mcp-{0}', parameters('environmentName')))]",
     "deployPrivateEndpoints": true,
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), parameters('location')))]",
     "resourceGroupName": "[resourceGroup().name]",
@@ -71,6 +88,540 @@
     "searchServiceName": "[format('srch-{0}', take(variables('resourceToken'), 12))]"
   },
   "resources": [
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken')))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken'))), variables('mcpIdentityResourceId'), variables('acrPullRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPullRoleId'))]",
+        "principalId": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityPrincipalId.value]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken')))]",
+      "name": "[guid(resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken'))), parameters('principalId'), variables('acrPushRoleId'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acrPushRoleId'))]",
+        "principalId": "[parameters('principalId')]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mcpRuntime",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "environmentName": {
+            "value": "[format('cae-intake-mcp-{0}', parameters('environmentName'))]"
+          },
+          "appName": {
+            "value": "[format('ca-intake-mcp-{0}', parameters('environmentName'))]"
+          },
+          "subnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.mcpSubnetId.value]"
+          },
+          "image": {
+            "value": "[parameters('intakeMcpImage')]"
+          },
+          "acrLoginServer": {
+            "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken'))), '2023-07-01').loginServer]"
+          },
+          "mcpIdentityId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityId.value]"
+          },
+          "mcpIdentityClientId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityClientId.value]"
+          },
+          "tenantId": {
+            "value": "[subscription().tenantId]"
+          },
+          "mcpAppClientId": {
+            "value": "[parameters('intakeMcpAppClientId')]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+          },
+          "logAnalyticsWorkspaceCustomerId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsCustomerId.value]"
+          },
+          "logAnalyticsSharedKey": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsSharedKey.value]"
+          },
+          "cosmosEndpoint": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
+          },
+          "cosmosDatabase": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value]"
+          },
+          "cosmosRequestsContainer": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.requestsContainerName.value]"
+          },
+          "cosmosTemplatesContainer": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.templatesContainerName.value]"
+          },
+          "cosmosIdempotencyContainer": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.idempotencyContainerName.value]"
+          },
+          "serviceBusNamespace": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.namespaceFqdn.value]"
+          },
+          "serviceBusQueue": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.queueName.value]"
+          },
+          "blobEndpoint": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
+          },
+          "artifactsContainer": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.artifactsContainer.value]"
+          },
+          "environmentNameTag": {
+            "value": "[parameters('environmentName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "11363627827926330090"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            },
+            "environmentName": {
+              "type": "string"
+            },
+            "appName": {
+              "type": "string"
+            },
+            "subnetId": {
+              "type": "string"
+            },
+            "image": {
+              "type": "string"
+            },
+            "acrLoginServer": {
+              "type": "string"
+            },
+            "mcpIdentityId": {
+              "type": "string"
+            },
+            "mcpIdentityClientId": {
+              "type": "string"
+            },
+            "tenantId": {
+              "type": "string"
+            },
+            "mcpAppClientId": {
+              "type": "string"
+            },
+            "appInsightsConnectionString": {
+              "type": "string"
+            },
+            "logAnalyticsWorkspaceCustomerId": {
+              "type": "string"
+            },
+            "logAnalyticsSharedKey": {
+              "type": "securestring"
+            },
+            "cosmosEndpoint": {
+              "type": "string"
+            },
+            "cosmosDatabase": {
+              "type": "string"
+            },
+            "cosmosRequestsContainer": {
+              "type": "string"
+            },
+            "cosmosTemplatesContainer": {
+              "type": "string"
+            },
+            "cosmosIdempotencyContainer": {
+              "type": "string"
+            },
+            "serviceBusNamespace": {
+              "type": "string"
+            },
+            "serviceBusQueue": {
+              "type": "string"
+            },
+            "blobEndpoint": {
+              "type": "string"
+            },
+            "artifactsContainer": {
+              "type": "string"
+            },
+            "environmentNameTag": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "mcpAudience": "[format('api://{0}', parameters('mcpAppClientId'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.App/managedEnvironments",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('environmentName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "appLogsConfiguration": {
+                  "destination": "log-analytics",
+                  "logAnalyticsConfiguration": {
+                    "customerId": "[parameters('logAnalyticsWorkspaceCustomerId')]",
+                    "sharedKey": "[parameters('logAnalyticsSharedKey')]"
+                  }
+                },
+                "workloadProfiles": [
+                  {
+                    "name": "Consumption",
+                    "workloadProfileType": "Consumption"
+                  }
+                ],
+                "vnetConfiguration": {
+                  "internal": true,
+                  "infrastructureSubnetId": "[parameters('subnetId')]"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/containerApps",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('appName')]",
+              "location": "[parameters('location')]",
+              "tags": "[union(parameters('tags'), createObject('azd-service-name', 'intake-mcp'))]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[format('{0}', parameters('mcpIdentityId'))]": {}
+                }
+              },
+              "properties": {
+                "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+                "workloadProfileName": "Consumption",
+                "configuration": {
+                  "activeRevisionsMode": "Single",
+                  "ingress": {
+                    "external": true,
+                    "allowInsecure": false,
+                    "targetPort": 8080,
+                    "transport": "auto"
+                  },
+                  "registries": [
+                    {
+                      "server": "[parameters('acrLoginServer')]",
+                      "identity": "[parameters('mcpIdentityId')]"
+                    }
+                  ]
+                },
+                "template": {
+                  "containers": [
+                    {
+                      "name": "intake-mcp",
+                      "image": "[parameters('image')]",
+                      "resources": {
+                        "cpu": "[json('0.5')]",
+                        "memory": "1Gi"
+                      },
+                      "env": [
+                        {
+                          "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                          "value": "[parameters('appInsightsConnectionString')]"
+                        },
+                        {
+                          "name": "AZURE_CLIENT_ID",
+                          "value": "[parameters('mcpIdentityClientId')]"
+                        },
+                        {
+                          "name": "INTAKE_ENVIRONMENT",
+                          "value": "[parameters('environmentNameTag')]"
+                        },
+                        {
+                          "name": "INTAKE_HOSTED_TENANT_ID",
+                          "value": "[parameters('tenantId')]"
+                        },
+                        {
+                          "name": "INTAKE_HOSTED_AGENT_IDENTITY",
+                          "value": "prompt-intake-agent"
+                        },
+                        {
+                          "name": "INTAKE_PERSISTENCE_BACKEND",
+                          "value": "cosmos"
+                        },
+                        {
+                          "name": "INTAKE_COSMOS_ENDPOINT",
+                          "value": "[parameters('cosmosEndpoint')]"
+                        },
+                        {
+                          "name": "INTAKE_COSMOS_DATABASE",
+                          "value": "[parameters('cosmosDatabase')]"
+                        },
+                        {
+                          "name": "INTAKE_COSMOS_REQUESTS_CONTAINER",
+                          "value": "[parameters('cosmosRequestsContainer')]"
+                        },
+                        {
+                          "name": "INTAKE_COSMOS_TEMPLATES_CONTAINER",
+                          "value": "[parameters('cosmosTemplatesContainer')]"
+                        },
+                        {
+                          "name": "INTAKE_COSMOS_IDEMPOTENCY_CONTAINER",
+                          "value": "[parameters('cosmosIdempotencyContainer')]"
+                        },
+                        {
+                          "name": "INTAKE_SERVICEBUS_BACKEND",
+                          "value": "azure"
+                        },
+                        {
+                          "name": "INTAKE_SERVICEBUS_NAMESPACE",
+                          "value": "[parameters('serviceBusNamespace')]"
+                        },
+                        {
+                          "name": "INTAKE_SERVICEBUS_QUEUE",
+                          "value": "[parameters('serviceBusQueue')]"
+                        },
+                        {
+                          "name": "INTAKE_BLOB_BACKEND",
+                          "value": "azure"
+                        },
+                        {
+                          "name": "INTAKE_BLOB_ENDPOINT",
+                          "value": "[parameters('blobEndpoint')]"
+                        },
+                        {
+                          "name": "INTAKE_BLOB_CONTAINER_ARTIFACTS",
+                          "value": "[parameters('artifactsContainer')]"
+                        },
+                        {
+                          "name": "INTAKE_MCP_TENANT_ID",
+                          "value": "[parameters('tenantId')]"
+                        },
+                        {
+                          "name": "INTAKE_MCP_AUDIENCE",
+                          "value": "[variables('mcpAudience')]"
+                        },
+                        {
+                          "name": "INTAKE_MCP_SERVER_URL",
+                          "value": "[format('https://{0}.{1}/mcp', parameters('appName'), reference(resourceId('Microsoft.App/managedEnvironments', parameters('environmentName')), '2024-03-01').defaultDomain)]"
+                        },
+                        {
+                          "name": "INTAKE_MCP_REQUIRED_SCOPE",
+                          "value": "access_as_user"
+                        }
+                      ],
+                      "probes": [
+                        {
+                          "type": "Liveness",
+                          "httpGet": {
+                            "path": "/health",
+                            "port": 8080,
+                            "scheme": "HTTP"
+                          },
+                          "initialDelaySeconds": 5,
+                          "periodSeconds": 30
+                        },
+                        {
+                          "type": "Readiness",
+                          "httpGet": {
+                            "path": "/readiness",
+                            "port": 8080,
+                            "scheme": "HTTP"
+                          },
+                          "initialDelaySeconds": 5,
+                          "periodSeconds": 10
+                        }
+                      ]
+                    }
+                  ],
+                  "scale": {
+                    "minReplicas": 1,
+                    "maxReplicas": 5
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "environmentId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]"
+            },
+            "environmentDefaultDomain": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('environmentName')), '2024-03-01').defaultDomain]"
+            },
+            "environmentStaticIp": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/managedEnvironments', parameters('environmentName')), '2024-03-01').staticIp]"
+            },
+            "appId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/containerApps', parameters('appName'))]"
+            },
+            "appName": {
+              "type": "string",
+              "value": "[parameters('appName')]"
+            },
+            "appFqdn": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.App/containerApps', parameters('appName')), '2024-03-01').configuration.ingress.fqdn]"
+            },
+            "serverUrl": {
+              "type": "string",
+              "value": "[format('https://{0}.{1}/mcp', parameters('appName'), reference(resourceId('Microsoft.App/managedEnvironments', parameters('environmentName')), '2024-03-01').defaultDomain)]"
+            },
+            "audience": {
+              "type": "string",
+              "value": "[variables('mcpAudience')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'cosmos')]",
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]",
+        "[extensionResourceId(resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken'))), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.ContainerRegistry/registries', format('acr{0}', variables('resourceToken'))), variables('mcpIdentityResourceId'), variables('acrPullRoleId')))]",
+        "[resourceId('Microsoft.Resources/deployments', 'monitoring')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]",
+        "[resourceId('Microsoft.Resources/deployments', 'servicebus')]",
+        "[resourceId('Microsoft.Resources/deployments', 'storage')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mcpPrivateDns",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "tags": {
+            "value": "[parameters('tags')]"
+          },
+          "defaultDomain": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'mcpRuntime'), '2025-04-01').outputs.environmentDefaultDomain.value]"
+          },
+          "staticIp": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'mcpRuntime'), '2025-04-01').outputs.environmentStaticIp.value]"
+          },
+          "vnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.vnetId.value]"
+          },
+          "linkName": {
+            "value": "[format('link-{0}', variables('vnetName'))]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "18380909485901012984"
+            }
+          },
+          "parameters": {
+            "tags": {
+              "type": "object"
+            },
+            "defaultDomain": {
+              "type": "string"
+            },
+            "staticIp": {
+              "type": "string"
+            },
+            "vnetId": {
+              "type": "string"
+            },
+            "linkName": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/privateDnsZones",
+              "apiVersion": "2020-06-01",
+              "name": "[parameters('defaultDomain')]",
+              "location": "global",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/A",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', parameters('defaultDomain'), '*')]",
+              "properties": {
+                "ttl": 300,
+                "aRecords": [
+                  {
+                    "ipv4Address": "[parameters('staticIp')]"
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('defaultDomain'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+              "apiVersion": "2020-06-01",
+              "name": "[format('{0}/{1}', parameters('defaultDomain'), parameters('linkName'))]",
+              "location": "global",
+              "properties": {
+                "registrationEnabled": false,
+                "virtualNetwork": {
+                  "id": "[parameters('vnetId')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/privateDnsZones', parameters('defaultDomain'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "zoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', parameters('defaultDomain'))]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'mcpRuntime')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]"
+      ]
+    },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
@@ -239,7 +790,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14056292129671536172"
+              "templateHash": "12940693392027365766"
             }
           },
           "parameters": {
@@ -280,6 +831,7 @@
             "functionsSubnetId": "[format('{0}/subnets/snet-functions', resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]",
             "foundryAgentSubnetId": "[format('{0}/subnets/snet-foundry-agent', resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]",
             "containerAppsSubnetId": "[format('{0}/subnets/snet-container-apps', resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]",
+            "mcpSubnetId": "[format('{0}/subnets/snet-intake-mcp', resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]",
             "dnsZones": [
               "privatelink.documents.azure.com",
               "[format('privatelink.blob.{0}', environment().suffixes.storage)]",
@@ -356,6 +908,21 @@
                     "name": "snet-container-apps",
                     "properties": {
                       "addressPrefix": "10.0.4.0/23",
+                      "privateEndpointNetworkPolicies": "Enabled",
+                      "delegations": [
+                        {
+                          "name": "Microsoft.App.environments",
+                          "properties": {
+                            "serviceName": "Microsoft.App/environments"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "name": "snet-intake-mcp",
+                    "properties": {
+                      "addressPrefix": "10.0.6.0/23",
                       "privateEndpointNetworkPolicies": "Enabled",
                       "delegations": [
                         {
@@ -615,6 +1182,10 @@
               "type": "string",
               "value": "[variables('containerAppsSubnetId')]"
             },
+            "mcpSubnetId": {
+              "type": "string",
+              "value": "[variables('mcpSubnetId')]"
+            },
             "cosmosPrivateDnsZoneId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZones')[0])]"
@@ -682,7 +1253,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15204528086744114024"
+              "templateHash": "9653810788580636710"
             }
           },
           "parameters": {
@@ -722,6 +1293,13 @@
               "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
               "apiVersion": "2023-01-31",
               "name": "[format('id-intake-notify-{0}', parameters('environmentName'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]"
+            },
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('id-intake-mcp-{0}', parameters('environmentName'))]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]"
             }
@@ -774,6 +1352,18 @@
             "notifyIdentityClientId": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-intake-notify-{0}', parameters('environmentName'))), '2023-01-31').clientId]"
+            },
+            "mcpIdentityId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-intake-mcp-{0}', parameters('environmentName')))]"
+            },
+            "mcpIdentityPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-intake-mcp-{0}', parameters('environmentName'))), '2023-01-31').principalId]"
+            },
+            "mcpIdentityClientId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('id-intake-mcp-{0}', parameters('environmentName'))), '2023-01-31').clientId]"
             }
           }
         }
@@ -942,6 +1532,9 @@
           "functionsMIPrincipalId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           },
+          "mcpIdentityPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityPrincipalId.value]"
+          },
           "functionsSubnetId": {
             "value": "[variables('functionsSubnetId')]"
           }
@@ -953,7 +1546,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11220683421326395877"
+              "templateHash": "18155331875979186040"
             }
           },
           "parameters": {
@@ -973,6 +1566,9 @@
               "type": "string"
             },
             "functionsMIPrincipalId": {
+              "type": "string"
+            },
+            "mcpIdentityPrincipalId": {
               "type": "string"
             },
             "functionsSubnetId": {
@@ -1116,6 +1712,20 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
               ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', 'request-artifacts')]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', 'request-artifacts'), parameters('mcpIdentityPrincipalId'), variables('blobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('blobDataContributorRoleId'))]",
+                "principalId": "[parameters('mcpIdentityPrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', parameters('storageAccountName'), 'default', 'request-artifacts')]"
+              ]
             }
           ],
           "outputs": {
@@ -1178,6 +1788,9 @@
           },
           "workerIdentityPrincipalId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+          },
+          "mcpIdentityPrincipalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityPrincipalId.value]"
           }
         },
         "template": {
@@ -1187,7 +1800,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13209511517333091397"
+              "templateHash": "15105490327654110733"
             }
           },
           "parameters": {
@@ -1207,6 +1820,9 @@
               "type": "string"
             },
             "workerIdentityPrincipalId": {
+              "type": "string"
+            },
+            "mcpIdentityPrincipalId": {
               "type": "string"
             }
           },
@@ -1493,6 +2109,20 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('accountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), parameters('mcpIdentityPrincipalId'), '00000000-0000-0000-0000-000000000002'))]",
+              "properties": {
+                "roleDefinitionId": "[variables('cosmosDataContributorRoleDefId')]",
+                "principalId": "[parameters('mcpIdentityPrincipalId')]",
+                "scope": "[format('{0}/dbs/{1}', resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), 'intake')]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]",
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), 'intake')]"
               ]
             }
           ],
@@ -3201,6 +3831,10 @@
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
     },
+    "MCP_IDENTITY_CLIENT_ID": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.mcpIdentityClientId.value]"
+    },
     "AZURE_FOUNDRY_HUB_NAME": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value]"
@@ -3236,6 +3870,26 @@
     "AZURE_AI_MODEL_DEPLOYMENT_NAME": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.modelDeploymentName.value]"
+    },
+    "INTAKE_MCP_APP_NAME": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'mcpRuntime'), '2025-04-01').outputs.appName.value]"
+    },
+    "INTAKE_MCP_SERVER_URL": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'mcpRuntime'), '2025-04-01').outputs.serverUrl.value]"
+    },
+    "INTAKE_MCP_AUDIENCE": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'mcpRuntime'), '2025-04-01').outputs.audience.value]"
+    },
+    "INTAKE_MCP_CONNECTION_NAME": {
+      "type": "string",
+      "value": "prompt-intake-user"
+    },
+    "INTAKE_MCP_IMAGE": {
+      "type": "string",
+      "value": "[parameters('intakeMcpImage')]"
     }
   }
 }

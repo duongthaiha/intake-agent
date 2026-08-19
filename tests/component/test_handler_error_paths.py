@@ -120,12 +120,21 @@ async def _create_request(repos, actor):
     return await handler.handle(actor, TEMPLATE_ID)
 
 
-async def _propose(repos, request_id, revision, updates, key=None):
+async def _propose(repos, request_id, revision, updates, key=None, actor=None):
     req_repo, tpl_repo, outbox, idm = repos
     handler = ProposeFieldUpdatesHandler(req_repo, tpl_repo, outbox, idm)
     env = _envelope(request_id, revision, "propose_field_updates", key)
     data = ProposeFieldUpdatesData(updates=[FieldUpdateItem(**u) for u in updates])
-    return await handler.handle(env, None, data)
+    _actor = actor or ActorContext(
+        "requester-1",
+        "t-1",
+        frozenset(["requester"]),
+        "conv-1",
+        "act-1",
+        "corr-1",
+        "agent",
+    )
+    return await handler.handle(env, _actor, data)
 
 
 async def _submit(repos, request_id, revision, key=None, actor=None):
@@ -133,7 +142,13 @@ async def _submit(repos, request_id, revision, key=None, actor=None):
     handler = SubmitForReviewHandler(req_repo, tpl_repo, outbox, idm)
     env = _envelope(request_id, revision, "submit_for_review", key)
     _actor = actor or ActorContext(
-        "u-1", "t-1", frozenset(["requester"]), "conv-1", "act-1", "corr-1", "agent"
+        "requester-1",
+        "t-1",
+        frozenset(["requester"]),
+        "conv-1",
+        "act-1",
+        "corr-1",
+        "agent",
     )
     return await handler.handle(env, _actor)
 
@@ -185,7 +200,177 @@ async def test_propose_request_not_found(repos):
     env = _envelope("ghost-request", 1, "propose_field_updates")
     data = ProposeFieldUpdatesData(updates=[FieldUpdateItem(field_path="project.name", value="X")])
     with pytest.raises(NotFoundError):
-        await handler.handle(env, None, data)
+        await handler.handle(
+            env,
+            ActorContext(
+                "requester-1",
+                "t-1",
+                frozenset(["requester"]),
+                "conv-1",
+                "act-1",
+                "corr-1",
+                "agent",
+            ),
+            data,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Request ownership — caller-selected IDs never cross identity boundaries
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_or_create_rejects_conversation_collision(repos, actor_requester):
+    await _create_request(repos, actor_requester)
+    other = ActorContext(
+        "requester-2",
+        actor_requester.tenant_id,
+        frozenset(["requester"]),
+        actor_requester.conversation_id,
+        "act-2",
+        "corr-2",
+        "agent",
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await _create_request(repos, other)
+
+
+@pytest.mark.asyncio
+async def test_get_context_rejects_other_requester(repos, actor_requester):
+    created = await _create_request(repos, actor_requester)
+    req_repo, tpl_repo, _, _ = repos
+    handler = GetRequestContextHandler(req_repo, tpl_repo)
+    other = ActorContext(
+        "requester-2",
+        actor_requester.tenant_id,
+        frozenset(["requester"]),
+        "conv-2",
+        "act-2",
+        "corr-2",
+        "agent",
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await handler.handle(created["request_id"], other)
+
+
+@pytest.mark.asyncio
+async def test_get_context_allows_same_tenant_reviewer(
+    repos, actor_requester, actor_reviewer
+):
+    created = await _create_request(repos, actor_requester)
+    req_repo, tpl_repo, _, _ = repos
+
+    context = await GetRequestContextHandler(req_repo, tpl_repo).handle(
+        created["request_id"],
+        actor_reviewer,
+    )
+
+    assert context["request_id"] == created["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_context_rejects_cross_tenant_reviewer(
+    repos, actor_requester, actor_reviewer
+):
+    created = await _create_request(repos, actor_requester)
+    req_repo, tpl_repo, _, _ = repos
+    other_tenant = ActorContext(
+        actor_reviewer.user_id,
+        "t-2",
+        actor_reviewer.roles,
+        actor_reviewer.conversation_id,
+        actor_reviewer.activity_id,
+        actor_reviewer.correlation_id,
+        actor_reviewer.agent_identity,
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await GetRequestContextHandler(req_repo, tpl_repo).handle(
+            created["request_id"],
+            other_tenant,
+        )
+
+
+@pytest.mark.asyncio
+async def test_propose_rejects_other_requester(repos, actor_requester):
+    created = await _create_request(repos, actor_requester)
+    other = ActorContext(
+        "requester-2",
+        actor_requester.tenant_id,
+        frozenset(["requester"]),
+        "conv-2",
+        "act-2",
+        "corr-2",
+        "agent",
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await _propose(
+            repos,
+            created["request_id"],
+            created["current_revision"],
+            [{"field_path": "project.name", "value": "Unauthorized"}],
+            actor=other,
+        )
+
+
+@pytest.mark.asyncio
+async def test_idempotent_replay_is_authorized_before_disclosure(
+    repos, actor_requester
+):
+    created = await _create_request(repos, actor_requester)
+    key = "ownership-replay-key"
+    await _propose(
+        repos,
+        created["request_id"],
+        created["current_revision"],
+        [{"field_path": "project.name", "value": "Owned"}],
+        key=key,
+        actor=actor_requester,
+    )
+    other = ActorContext(
+        "requester-2",
+        actor_requester.tenant_id,
+        frozenset(["requester"]),
+        "conv-2",
+        "act-2",
+        "corr-2",
+        "agent",
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await _propose(
+            repos,
+            created["request_id"],
+            created["current_revision"],
+            [{"field_path": "project.name", "value": "Replay"}],
+            key=key,
+            actor=other,
+        )
+
+
+@pytest.mark.asyncio
+async def test_submit_rejects_other_requester(repos, actor_requester):
+    created = await _create_request(repos, actor_requester)
+    other = ActorContext(
+        "requester-2",
+        actor_requester.tenant_id,
+        frozenset(["requester"]),
+        "conv-2",
+        "act-2",
+        "corr-2",
+        "agent",
+    )
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await _submit(
+            repos,
+            created["request_id"],
+            created["current_revision"],
+            actor=other,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +539,41 @@ async def test_record_decision_invalid_decision_value(repos, actor_requester, ac
     data = RecordReviewDecisionData(decision="maybe", rationale="ok")
     with pytest.raises(ValidationError):
         await handler.handle(env, actor_reviewer, data)
+
+
+@pytest.mark.asyncio
+async def test_record_decision_rejects_cross_tenant_reviewer(
+    repos, actor_requester, actor_reviewer
+):
+    req_repo, _, outbox, idm = repos
+    handler = RecordReviewDecisionHandler(req_repo, outbox, idm)
+    req = await _create_request(repos, actor_requester)
+    rid = req["request_id"]
+    result = await _propose(
+        repos,
+        rid,
+        req["current_revision"],
+        [
+            {"field_path": "project.name", "value": "Portal"},
+            {"field_path": "project.description", "value": "desc"},
+            {"field_path": "priority", "value": "high"},
+        ],
+    )
+    await _submit(repos, rid, result["revision"])
+    other_tenant = ActorContext(
+        actor_reviewer.user_id,
+        "t-2",
+        actor_reviewer.roles,
+        actor_reviewer.conversation_id,
+        actor_reviewer.activity_id,
+        actor_reviewer.correlation_id,
+        actor_reviewer.agent_identity,
+    )
+    envelope = _envelope(rid, result["revision"], "record_review_decision")
+    data = RecordReviewDecisionData(decision="approve", rationale="ok")
+
+    with pytest.raises(NotFoundError, match="Request not found"):
+        await handler.handle(envelope, other_tenant, data)
 
 
 # ---------------------------------------------------------------------------
