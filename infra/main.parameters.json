@@ -11,17 +11,8 @@
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
     },
-    "deployFoundry": {
-      "value": true
-    },
     "deployBotService": {
       "value": false
-    },
-    "deployPrivateEndpoints": {
-      "value": true
-    },
-    "deployStoragePrivateEndpoint": {
-      "value": true
     }
   }
 }

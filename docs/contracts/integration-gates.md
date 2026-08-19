@@ -46,20 +46,36 @@
 
 ## CI pipeline structure
 
+`.github/workflows/ci.yml` implements this as a set of blocking jobs
+aggregated into one required status check (`Required Checks` /
+`required-checks`); see `docs/quality/test-strategy.md §4` for the full
+gate-to-job mapping.
+
 ```
-PR → lint + type-check + unit + component + contract → merge
-main → integration tests + local demo verification → deploy to dev
-release → evaluation job + acceptance gates → promote to test/prod
+PR → bicep-validate, lint-and-types (ruff+mypy), import-boundaries,
+     pr-tests (unit/contract/component/security/accessibility + coverage),
+     bandit-scan (HIGH severity), secret-scan, iac-scan (HIGH/CRITICAL)
+     → Required Checks → merge
+main push → adds integration-tests (in-memory, no Azure creds) → deploy to dev
+release → evaluation job (eval.yaml, evaluation/) + acceptance gates,
+          run separately from ci.yml → promote to test/prod
 ```
+
+Live Azure durability tests (`tests/azure`, `-m azure`) and the evaluation
+gate stay out of `ci.yml` by design — they require an approved
+VNet-connected runner and/or Foundry credentials.
 
 ## Quality thresholds
 
 | Metric | Threshold | Enforcement |
 |--------|-----------|-------------|
-| Unit test coverage (`intake_domain`) | ≥ 80% | CI fail |
-| Type check | Zero errors | CI fail |
-| Import boundary | Zero violations | CI fail |
-| Lint (ruff) | Zero errors | CI fail |
-| Component test pass rate | 100% | CI fail |
-| Contract test pass rate | 100% | CI fail |
-| Security scan (bandit + safety) | Zero high/critical | CI fail |
+| Unit test coverage (`intake_domain`) | ≥ 80% | CI fail (`.coveragerc`, job `pr-tests`) |
+| Type check | Zero errors | CI fail (`mypy --strict`, job `lint-and-types`) |
+| Import boundary | Zero violations | CI fail (`lint-imports`, job `import-boundaries`) |
+| Lint (ruff) | Zero errors | CI fail (job `lint-and-types`) |
+| Component test pass rate | 100% | CI fail (job `pr-tests`) |
+| Contract test pass rate | 100% | CI fail (job `pr-tests`) |
+| Security scan (Bandit HIGH severity) | Zero | CI fail (`bandit -r src/ -lll`, job `bandit-scan`) |
+| Secret scan (Trivy) | Zero detections | CI fail (job `secret-scan`) |
+| IaC scan (Trivy, HIGH/CRITICAL) | Zero | CI fail after Bicep-to-ARM compilation (job `iac-scan`) |
+| Bicep build + lint | Zero errors | CI fail (job `bicep-validate`) |

@@ -3,7 +3,9 @@
 param(
   [string]$SubscriptionId = $env:AZURE_SUBSCRIPTION_ID,
   [string]$Location = ($env:AZURE_LOCATION ?? "eastus2"),
-  [string]$EnvName = ($env:AZURE_ENV_NAME ?? "dev")
+  [string]$EnvName = ($env:AZURE_ENV_NAME ?? "dev"),
+  [string]$PrincipalId = $env:AZURE_PRINCIPAL_ID,
+  [string]$ResourceGroup = ($env:AZURE_RESOURCE_GROUP ?? "rg-intake-$($env:AZURE_ENV_NAME ?? 'dev')")
 )
 
 $ErrorActionPreference = "Continue"
@@ -31,6 +33,9 @@ if ($subState -eq "Enabled") {
 }
 
 Write-Sect "2. Provider Registrations"
+# Foundry is provisioned unconditionally by infra/main.bicep (the dead
+# deployFoundry toggle is gone), so its providers are hard requirements, not
+# warnings. Only the Bot Service remains genuinely optional.
 $required = @{
   "Microsoft.Storage" = "required"
   "Microsoft.DocumentDB" = "required"
@@ -43,8 +48,8 @@ $required = @{
   "Microsoft.ManagedIdentity" = "required"
   "Microsoft.OperationalInsights" = "required"
   "microsoft.insights" = "required"
-  "Microsoft.MachineLearningServices" = "optional-foundry"
-  "Microsoft.CognitiveServices" = "optional-foundry"
+  "Microsoft.MachineLearningServices" = "required-foundry"
+  "Microsoft.CognitiveServices" = "required-foundry"
   "Microsoft.BotService" = "optional-bot"
 }
 foreach ($kv in $required.GetEnumerator()) {
@@ -54,23 +59,44 @@ foreach ($kv in $required.GetEnumerator()) {
     Write-Info "$($kv.Key): Registered"
   } elseif ($kv.Value -eq "required") {
     Write-Fail "$($kv.Key): $state — register with: az provider register --namespace $($kv.Key)"
-  } elseif ($kv.Value -eq "optional-foundry") {
-    Write-Warn "$($kv.Key): $state — required when deployFoundry=true"
+  } elseif ($kv.Value -eq "required-foundry") {
+    Write-Fail "$($kv.Key): $state — Foundry is deployed unconditionally; register with: az provider register --namespace $($kv.Key)"
   } else {
     Write-Warn "$($kv.Key): $state — required when deployBotService=true"
   }
 }
 
+# The deployment needs two distinct capabilities at the target resource group:
+#   1. Contributor — to create/update the resources themselves.
+#   2. Authority to WRITE role assignments — main.bicep and the postprovision
+#      RBAC reconciliation both create Microsoft.Authorization/roleAssignments.
+#      Contributor explicitly cannot do this, so a deployment with Contributor
+#      alone fails partway through, after resources exist. Any one of Role
+#      Based Access Control Administrator, User Access Administrator, or Owner
+#      satisfies it.
 Write-Sect "3. RBAC"
-$principalId = az ad signed-in-user show --query id -o tsv 2>$null
-if ($principalId) {
-  Write-Info "Deploying principal: $principalId"
-  $ownerRole = az role assignment list --assignee $principalId --subscription $SubscriptionId --all `
-    --query "[?roleDefinitionName=='Owner'].roleDefinitionName | [0]" -o tsv 2>$null
-  if ($ownerRole) {
-    Write-Info "Owner role found"
+if (-not $PrincipalId) {
+  Write-Fail "AZURE_PRINCIPAL_ID is required (federated service principal object ID)"
+} else {
+  Write-Info "Deploying service principal: $PrincipalId"
+  # Includes inherited subscription/management-group assignments, which are
+  # just as effective at the resource-group scope.
+  $assigned = @(az role assignment list --assignee-object-id $PrincipalId `
+    --scope "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroup" --include-inherited `
+    --query "[].roleDefinitionName" -o tsv 2>$null)
+
+  if (($assigned -contains "Contributor") -or ($assigned -contains "Owner")) {
+    Write-Info "Contributor-equivalent role found at $ResourceGroup"
   } else {
-    Write-Warn "Owner role not found at subscription scope — verify resource group level RBAC"
+    Write-Fail "Contributor role not found at $ResourceGroup for supplied service principal"
+  }
+
+  $roleWriteRoles = @("Role Based Access Control Administrator", "User Access Administrator", "Owner")
+  $roleWriteFound = $roleWriteRoles | Where-Object { $assigned -contains $_ } | Select-Object -First 1
+  if ($roleWriteFound) {
+    Write-Info "Role-assignment authority found at ${ResourceGroup}: $roleWriteFound"
+  } else {
+    Write-Fail "No role-assignment authority at $ResourceGroup — the deployment creates role assignments and needs one of: $($roleWriteRoles -join ', ')"
   }
 }
 

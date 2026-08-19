@@ -201,7 +201,7 @@ resource deployerFoundryUser 'Microsoft.Authorization/roleAssignments@2022-04-01
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', foundryUserRoleId)
     principalId: deployerPrincipalId
-    principalType: 'User'
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -442,14 +442,38 @@ requirements are documented in
 
 ### GitHub Actions
 
-`.github/workflows/ci.yml` performs Bicep and Python checks.
-`.github/workflows/deploy.yml` uses workload identity federation and stores no
-Azure password or client secret.
+`.github/workflows/ci.yml` performs Bicep and Python checks on the
+GitHub-hosted runner; it requires no private-network access.
 
-Configure the repository/environment variables documented at the top of
-`deploy.yml`. A GitHub-hosted runner cannot invoke a private Foundry endpoint
-unless it has an approved private-network path; use a VNet-connected
-self-hosted runner or equivalent approved deployment runner for those steps.
+`.github/workflows/deploy.yml` targets the `dev` environment only and uses
+GitHub OIDC (workload identity federation) — it stores no Azure password or
+client secret. Its private-network steps run on an ephemeral, repository-scoped
+Azure Container Apps Jobs runner labeled `aca-intake-dev`; that runner's
+managed identity has `AcrPull` only. The steady-state
+[`infra/main.bicep`](infra/main.bicep) deployment is resource-group scoped and
+does not manage runner resources. Runner creation and PAT rotation are
+out-of-band operations implemented by
+[`scripts/azure/bootstrap-runner.sh`](scripts/azure/bootstrap-runner.sh) and
+[`infra/bootstrap-runner.bicep`](infra/bootstrap-runner.bicep).
+
+The repository implementation is complete, but the external GitHub and Azure
+bootstrap is **not yet complete**, so the deploy workflow is not operational
+yet. Operators must configure the OIDC federated credential and required
+`dev` Environment controls/variables, then bootstrap the runner. The workflow
+requires `Azure/setup-azd` v2 and installs `microsoft.foundry`; its
+post-deploy verification is blocking and runs after `azd deploy`.
+`AZURE_RESOURCE_GROUP` is fixed to `rg-intake-dev`. `test` and `prod` remain
+out of scope.
+
+Bootstrap must also set the repository Actions fork pull-request contributor
+approval policy to **all external contributors**. Before approving an external
+workflow, review its workflow-file changes, especially `runs-on` labels that
+could target the repository-scoped self-hosted runner.
+
+Follow [docs/operations/cicd.md](docs/operations/cicd.md) for the full
+bootstrap procedure, environment variable names, approval gate, evidence
+review, troubleshooting, and rollback runbook before relying on this
+pipeline for a deployment.
 
 ## Architecture
 
