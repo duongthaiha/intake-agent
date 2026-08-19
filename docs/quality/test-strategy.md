@@ -96,6 +96,9 @@ Requirements:
 - Zero ruff/mypy errors
 - Zero HIGH-severity Bandit findings; zero secrets detected; zero
   HIGH/CRITICAL Trivy findings in the ARM JSON compiled from all Bicep files
+- `.trivyignore.yaml` contains one path-scoped, expiring `AZU-0013` exception
+  for Trivy 0.70's Key Vault ARM false positive; static tests independently
+  enforce `publicNetworkAccess: Disabled` and deny-by-default network ACLs
 
 ### Merge to Main Gate (adds, on `push` to `main` only)
 

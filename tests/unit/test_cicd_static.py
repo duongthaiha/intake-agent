@@ -328,6 +328,16 @@ def test_trivy_iac_scan_blocks_high_and_critical(ci_workflow_text: str) -> None:
     assert "infra/bootstrap-runner.bicep" in ci_workflow_text
     assert "infra/modules/*.bicep" in ci_workflow_text
     assert "scan-ref: .trivy-iac/" in ci_workflow_text
+    assert "trivyignores: .trivyignore.yaml" in ci_workflow_text
+
+
+def test_trivy_key_vault_ignore_is_scoped_and_expiring() -> None:
+    ignore_text = (REPO_ROOT / ".trivyignore.yaml").read_text(encoding="utf-8")
+    assert "id: AZU-0013" in ignore_text
+    assert "modules/keyvault.json" in ignore_text
+    assert "publicNetworkAccess to Disabled" in ignore_text
+    assert "networkAcls.defaultAction to Deny" in ignore_text
+    assert re.search(r"expired_at:\s*20\d{2}-\d{2}-\d{2}T", ignore_text)
 
 
 # ---------------------------------------------------------------------------
