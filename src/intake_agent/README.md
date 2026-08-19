@@ -2,6 +2,10 @@
 
 Python backend for the Intake Agent — domain layer, persistence adapters, and local HTTP demo.
 
+New contributors should start with the
+[developer guide](../../docs/developer-guide.md) for the current feature status,
+component call chains, and end-to-end workflows.
+
 ## Packages
 
 | Package | Purpose |
@@ -9,7 +13,7 @@ Python backend for the Intake Agent — domain layer, persistence adapters, and 
 | `intake_domain` | Pure domain — entities, repositories (protocols), commands, events, services |
 | `intake_persistence` | Repository implementations: in-memory (local/CI) and Azure adapters (Cosmos, Blob, Service Bus) |
 | `intake_agent` | Foundry Hosted Agent: config, adapters, orchestrator, FastAPI demo entrypoint |
-| `intake_workers` | Azure Functions worker: outbox dispatcher, document/notification/integration workers |
+| `intake_workers` | Azure Functions: durable outbox dispatcher plus domain/document/notification trigger scaffolding |
 
 ## Quick start (local, no Azure required)
 

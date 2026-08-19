@@ -12,6 +12,7 @@ Microsoft Teams integration assets.
 
 | Goal | Start here |
 |---|---|
+| Join the project as a developer | [Developer guide: features and component workflows](docs/developer-guide.md) |
 | Use the deployed agent | [Use the deployed solution](#use-the-deployed-solution) |
 | Run the solution without Azure | [Run locally](#run-locally) |
 | Test the Teams cards and activity parser | [Run the Teams demo](#run-the-teams-demo) |
@@ -31,8 +32,9 @@ The agent supports this lifecycle:
 5. Resume the same request in the current or a fresh Foundry session.
 6. Submit a complete request for human review.
 7. Publish committed domain events through a durable outbox to Service Bus.
-8. Run document, notification, integration, and outbox workers in Azure
-   Functions.
+8. Dispatch the durable outbox in Azure Functions. Domain-event routing,
+   document generation, and notification delivery currently have trigger
+   scaffolding but not production processing logic.
 
 Validation, lifecycle transitions, authorization boundaries, concurrency, and
 idempotency live in Python code rather than in the model prompt.
@@ -140,8 +142,10 @@ authoritative source if the environment has since changed.
 | Network posture | Private endpoints; public access disabled |
 | Authentication | User-assigned managed identities; no application keys |
 
-The Function App has no HTTP trigger by design. Its four functions process
-Service Bus messages and outbox dispatch work.
+The Function App has no HTTP trigger by design. Its timer function dispatches
+the durable outbox; the three queue-trigger functions currently decode and log
+domain, document, and notification messages while their processing logic is
+completed.
 
 ## Run locally
 
@@ -501,11 +505,12 @@ Repository packages:
 | `intake_domain` | Entities, validation, lifecycle, commands, events, protocols |
 | `intake_persistence` | In-memory and managed-identity Azure adapters |
 | `intake_agent` | Local API and Foundry Hosted Agent composition |
-| `intake_workers` | Outbox, document, notification, and integration workers |
+| `intake_workers` | Durable outbox dispatcher and Azure Functions trigger scaffolding |
 | `intake_teams` | Teams contracts, cards, parsing, auth boundary, and demo |
 
 Read more:
 
+- [Developer guide: features and component workflows](docs/developer-guide.md)
 - [Architecture](architecture.md)
 - [Product backlog](productbacklog.md)
 - [Package boundaries](docs/adr/ADR-012-package-module-boundaries.md)
