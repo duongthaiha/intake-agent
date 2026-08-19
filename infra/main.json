@@ -1,11 +1,11 @@
 {
-  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11733172349078037118"
+      "templateHash": "16839358743637982199"
     }
   },
   "parameters": {
@@ -26,16 +26,9 @@
     },
     "principalId": {
       "type": "string",
-      "defaultValue": "",
+      "minLength": 1,
       "metadata": {
-        "description": "Object ID of the identity running the deployment (for KV access policy during bootstrap)."
-      }
-    },
-    "deployFoundry": {
-      "type": "bool",
-      "defaultValue": false,
-      "metadata": {
-        "description": "Deploy a private Microsoft Foundry account, project, model and Standard Agent capability host."
+        "description": "Object ID of the federated service principal running azd. Set AZURE_PRINCIPAL_ID; it is never inferred from an interactive user."
       }
     },
     "deployBotService": {
@@ -43,20 +36,6 @@
       "defaultValue": false,
       "metadata": {
         "description": "Deploy Azure Bot Service resource. Requires Microsoft.BotService provider registered + Teams publishing spike resolved."
-      }
-    },
-    "deployPrivateEndpoints": {
-      "type": "bool",
-      "defaultValue": false,
-      "metadata": {
-        "description": "Deploy private endpoints and configure public network access. Set true only after connectivity spike confirms Foundry → private data-plane path."
-      }
-    },
-    "deployStoragePrivateEndpoint": {
-      "type": "bool",
-      "defaultValue": false,
-      "metadata": {
-        "description": "Deploy ONLY the storage blob private endpoint to enable in-VNet FC1 deployment (bypasses publicNetworkAccess:Disabled policy) without enabling all other PEs."
       }
     },
     "searchServiceLocation": {
@@ -80,8 +59,9 @@
     }
   },
   "variables": {
+    "deployPrivateEndpoints": true,
     "resourceToken": "[toLower(uniqueString(subscription().id, parameters('environmentName'), parameters('location')))]",
-    "resourceGroupName": "[format('rg-intake-{0}', parameters('environmentName'))]",
+    "resourceGroupName": "[resourceGroup().name]",
     "vnetName": "[format('vnet-intake-{0}', parameters('environmentName'))]",
     "functionsSubnetId": "[format('/subscriptions/{0}/resourceGroups/{1}/providers/Microsoft.Network/virtualNetworks/{2}/subnets/snet-functions', subscription().subscriptionId, variables('resourceGroupName'), variables('vnetName'))]",
     "storageAccountName": "[format('st{0}', take(variables('resourceToken'), 10))]",
@@ -92,17 +72,9 @@
   },
   "resources": [
     {
-      "type": "Microsoft.Resources/resourceGroups",
-      "apiVersion": "2024-07-01",
-      "name": "[variables('resourceGroupName')]",
-      "location": "[parameters('location')]",
-      "tags": "[parameters('tags')]"
-    },
-    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "monitoring",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -220,16 +192,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "network",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -246,10 +214,10 @@
             "value": "[format('vnet-intake-{0}', parameters('environmentName'))]"
           },
           "deployPrivateEndpoints": {
-            "value": "[parameters('deployPrivateEndpoints')]"
+            "value": "[variables('deployPrivateEndpoints')]"
           },
           "deployStoragePrivateEndpoint": {
-            "value": "[parameters('deployStoragePrivateEndpoint')]"
+            "value": true
           },
           "cosmosAccountName": {
             "value": "[variables('cosmosAccountName')]"
@@ -271,7 +239,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10854453858441000936"
+              "templateHash": "14056292129671536172"
             }
           },
           "parameters": {
@@ -320,7 +288,8 @@
               "privatelink.vaultcore.azure.net",
               "privatelink.services.ai.azure.com",
               "privatelink.openai.azure.com",
-              "privatelink.cognitiveservices.azure.com"
+              "privatelink.cognitiveservices.azure.com",
+              "privatelink.azurecr.io"
             ]
           },
           "resources": [
@@ -677,19 +646,19 @@
             "foundryCognitiveServicesPrivateDnsZoneId": {
               "type": "string",
               "value": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZones')[7])]"
+            },
+            "acrPrivateDnsZoneId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/privateDnsZones', variables('dnsZones')[8])]"
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "identity",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -808,16 +777,12 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
-      ]
+      }
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "keyvault",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -833,11 +798,8 @@
           "keyVaultName": {
             "value": "[format('kv-{0}', take(variables('resourceToken'), 16))]"
           },
-          "deployPrivateEndpoints": {
-            "value": "[parameters('deployPrivateEndpoints')]"
-          },
           "workerIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           },
           "deployerPrincipalId": {
             "value": "[parameters('principalId')]"
@@ -850,7 +812,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "17780671026721847884"
+              "templateHash": "6482742612813245560"
             }
           },
           "parameters": {
@@ -862,9 +824,6 @@
             },
             "keyVaultName": {
               "type": "string"
-            },
-            "deployPrivateEndpoints": {
-              "type": "bool"
             },
             "workerIdentityPrincipalId": {
               "type": "string"
@@ -898,8 +857,11 @@
                 "enableSoftDelete": true,
                 "softDeleteRetentionInDays": 90,
                 "enablePurgeProtection": true,
-                "publicNetworkAccess": "[if(parameters('deployPrivateEndpoints'), 'Disabled', 'Enabled')]",
-                "networkAcls": "[if(parameters('deployPrivateEndpoints'), createObject('defaultAction', 'Deny', 'bypass', 'AzureServices'), createObject('defaultAction', 'Allow', 'bypass', 'AzureServices'))]"
+                "publicNetworkAccess": "Disabled",
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "bypass": "AzureServices"
+                }
               }
             },
             {
@@ -925,7 +887,7 @@
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('kvSecretsOfficerRoleId'))]",
                 "principalId": "[parameters('deployerPrincipalId')]",
-                "principalType": "User"
+                "principalType": "ServicePrincipal"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
@@ -949,15 +911,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "storage",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -973,17 +933,14 @@
           "storageAccountName": {
             "value": "[format('st{0}', take(variables('resourceToken'), 10))]"
           },
-          "deployPrivateEndpoints": {
-            "value": "[parameters('deployPrivateEndpoints')]"
-          },
           "workerIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           },
           "evalIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityPrincipalId.value]"
           },
           "functionsMIPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           },
           "functionsSubnetId": {
             "value": "[variables('functionsSubnetId')]"
@@ -996,7 +953,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "12300515631658268827"
+              "templateHash": "11220683421326395877"
             }
           },
           "parameters": {
@@ -1008,9 +965,6 @@
             },
             "storageAccountName": {
               "type": "string"
-            },
-            "deployPrivateEndpoints": {
-              "type": "bool"
             },
             "workerIdentityPrincipalId": {
               "type": "string"
@@ -1050,8 +1004,12 @@
                 "supportsHttpsTrafficOnly": true,
                 "allowBlobPublicAccess": false,
                 "allowSharedKeyAccess": false,
-                "publicNetworkAccess": "[if(parameters('deployPrivateEndpoints'), 'Disabled', 'Enabled')]",
-                "networkAcls": "[if(parameters('deployPrivateEndpoints'), createObject('defaultAction', 'Deny', 'bypass', 'AzureServices, Logging, Metrics', 'virtualNetworkRules', if(not(empty(parameters('functionsSubnetId'))), createArray(createObject('id', parameters('functionsSubnetId'), 'action', 'Allow')), createArray())), createObject('defaultAction', 'Allow', 'bypass', 'AzureServices, Logging, Metrics', 'virtualNetworkRules', if(not(empty(parameters('functionsSubnetId'))), createArray(createObject('id', parameters('functionsSubnetId'), 'action', 'Allow')), createArray())))]",
+                "publicNetworkAccess": "Disabled",
+                "networkAcls": {
+                  "defaultAction": "Deny",
+                  "bypass": "AzureServices, Logging, Metrics",
+                  "virtualNetworkRules": "[if(not(empty(parameters('functionsSubnetId'))), createArray(createObject('id', parameters('functionsSubnetId'), 'action', 'Allow')), createArray())]"
+                },
                 "encryption": {
                   "services": {
                     "blob": {
@@ -1189,16 +1147,14 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "cosmos",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -1215,13 +1171,13 @@
             "value": "[format('cosmos-{0}', take(variables('resourceToken'), 10))]"
           },
           "deployPrivateEndpoints": {
-            "value": "[parameters('deployPrivateEndpoints')]"
+            "value": "[variables('deployPrivateEndpoints')]"
           },
           "agentIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
           },
           "workerIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           }
         },
         "template": {
@@ -1573,15 +1529,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "servicebus",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -1598,10 +1552,10 @@
             "value": "[variables('serviceBusName')]"
           },
           "agentIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
           },
           "workerIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityPrincipalId.value]"
           }
         },
         "template": {
@@ -1798,15 +1752,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "search",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -1823,10 +1775,10 @@
             "value": "[format('srch-{0}', take(variables('resourceToken'), 12))]"
           },
           "deployPrivateEndpoints": {
-            "value": "[parameters('deployPrivateEndpoints')]"
+            "value": "[variables('deployPrivateEndpoints')]"
           },
           "agentIdentityPrincipalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
           }
         },
         "template": {
@@ -1922,15 +1874,13 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "functions",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -1950,52 +1900,52 @@
             "value": "[format('asp-intake-{0}', parameters('environmentName'))]"
           },
           "storageAccountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
           },
           "appInsightsConnectionString": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
           },
           "workerIdentityId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityId.value]"
           },
           "workerIdentityClientId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityClientId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityClientId.value]"
           },
           "cosmosEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
           },
           "cosmosDatabase": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value]"
           },
           "cosmosRequestsContainer": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.requestsContainerName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.requestsContainerName.value]"
           },
           "cosmosTemplatesContainer": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.templatesContainerName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.templatesContainerName.value]"
           },
           "cosmosIdempotencyContainer": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.idempotencyContainerName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.idempotencyContainerName.value]"
           },
           "serviceBusNamespace": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.namespaceFqdn.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.namespaceFqdn.value]"
           },
           "serviceBusQueue": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.queueName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.queueName.value]"
           },
           "blobEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
           },
           "artifactsContainer": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.artifactsContainer.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.artifactsContainer.value]"
           },
           "keyVaultUri": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultUri.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultUri.value]"
           },
           "environmentName": {
             "value": "[parameters('environmentName')]"
           },
           "vnetIntegrationSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.functionsSubnetId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.functionsSubnetId.value]"
           }
         },
         "template": {
@@ -2230,21 +2180,19 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'servicebus')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage')]"
+        "[resourceId('Microsoft.Resources/deployments', 'cosmos')]",
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]",
+        "[resourceId('Microsoft.Resources/deployments', 'keyvault')]",
+        "[resourceId('Microsoft.Resources/deployments', 'monitoring')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]",
+        "[resourceId('Microsoft.Resources/deployments', 'servicebus')]",
+        "[resourceId('Microsoft.Resources/deployments', 'storage')]"
       ]
     },
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "containerApps",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -2264,28 +2212,28 @@
             "value": "[format('job-intake-eval-{0}', parameters('environmentName'))]"
           },
           "logAnalyticsWorkspaceCustomerId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsCustomerId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsCustomerId.value]"
           },
           "logAnalyticsSharedKey": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsSharedKey.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsSharedKey.value]"
           },
           "evalIdentityId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityId.value]"
           },
           "evalIdentityClientId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityClientId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityClientId.value]"
           },
           "storageEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
           },
           "evalContainer": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.evalContainer.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.evalContainer.value]"
           },
           "appInsightsConnectionString": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
           },
           "subnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.containerAppsSubnetId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.containerAppsSubnetId.value]"
           },
           "environmentNameTag": {
             "value": "[parameters('environmentName')]"
@@ -2452,19 +2400,16 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage')]"
+        "[resourceId('Microsoft.Resources/deployments', 'identity')]",
+        "[resourceId('Microsoft.Resources/deployments', 'monitoring')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]",
+        "[resourceId('Microsoft.Resources/deployments', 'storage')]"
       ]
     },
     {
-      "condition": "[parameters('deployFoundry')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "foundry",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -2502,34 +2447,34 @@
             "value": 10
           },
           "storageAccountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
           },
           "storageAccountId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountId.value]"
           },
           "storageBlobEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
           },
           "cosmosAccountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountName.value]"
           },
           "cosmosAccountId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountId.value]"
           },
           "cosmosEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
           },
           "searchServiceName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceName.value]"
           },
           "searchServiceId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceId.value]"
           },
           "searchEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value]"
           },
           "agentSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryAgentSubnetId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryAgentSubnetId.value]"
           },
           "deployerPrincipalId": {
             "value": "[parameters('principalId')]"
@@ -2542,7 +2487,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15155982532013124924"
+              "templateHash": "14919539519180613533"
             }
           },
           "parameters": {
@@ -2813,7 +2758,7 @@
               "properties": {
                 "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('foundryUserRoleId'))]",
                 "principalId": "[parameters('deployerPrincipalId')]",
-                "principalType": "User"
+                "principalType": "ServicePrincipal"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts/projects', parameters('accountName'), parameters('projectName'))]"
@@ -2913,19 +2858,16 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage')]"
+        "[resourceId('Microsoft.Resources/deployments', 'cosmos')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]",
+        "[resourceId('Microsoft.Resources/deployments', 'search')]",
+        "[resourceId('Microsoft.Resources/deployments', 'storage')]"
       ]
     },
     {
-      "condition": "[parameters('deployFoundry')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "foundryPrivateEndpoint",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -2939,19 +2881,19 @@
             "value": "[parameters('tags')]"
           },
           "accountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value]"
           },
           "accountId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountId.value]"
           },
           "privateEndpointSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.peSubnetId.value]"
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.peSubnetId.value]"
           },
           "foundryPrivateDnsZoneIds": {
             "value": [
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryServicesPrivateDnsZoneId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryOpenAiPrivateDnsZoneId.value]",
-              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryCognitiveServicesPrivateDnsZoneId.value]"
+              "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryServicesPrivateDnsZoneId.value]",
+              "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryOpenAiPrivateDnsZoneId.value]",
+              "[reference(resourceId('Microsoft.Resources/deployments', 'network'), '2025-04-01').outputs.foundryCognitiveServicesPrivateDnsZoneId.value]"
             ]
           }
         },
@@ -3041,9 +2983,8 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'network')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[resourceId('Microsoft.Resources/deployments', 'foundry')]",
+        "[resourceId('Microsoft.Resources/deployments', 'network')]"
       ]
     },
     {
@@ -3051,7 +2992,6 @@
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "bot",
-      "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
           "scope": "inner"
@@ -3157,10 +3097,7 @@
             }
           }
         }
-      },
-      "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
-      ]
+      }
     }
   ],
   "outputs": {
@@ -3178,123 +3115,127 @@
     },
     "AZURE_COSMOS_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.endpoint.value]"
     },
     "AZURE_COSMOS_DATABASE": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.databaseName.value]"
     },
     "AZURE_COSMOS_ACCOUNT_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.accountName.value]"
     },
     "AZURE_COSMOS_REQUESTS_CONTAINER": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.requestsContainerName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.requestsContainerName.value]"
     },
     "AZURE_COSMOS_TEMPLATES_CONTAINER": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.templatesContainerName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.templatesContainerName.value]"
     },
     "AZURE_COSMOS_IDEMPOTENCY_CONTAINER": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.idempotencyContainerName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'cosmos'), '2025-04-01').outputs.idempotencyContainerName.value]"
     },
     "AZURE_SERVICEBUS_NAMESPACE": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.namespaceFqdn.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.namespaceFqdn.value]"
     },
     "AZURE_SERVICEBUS_QUEUE": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.queueName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'servicebus'), '2025-04-01').outputs.queueName.value]"
     },
     "AZURE_STORAGE_ACCOUNT_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.accountName.value]"
     },
     "AZURE_STORAGE_BLOB_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.blobEndpoint.value]"
     },
     "AZURE_STORAGE_ARTIFACTS_CONTAINER": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.artifactsContainer.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'storage'), '2025-04-01').outputs.artifactsContainer.value]"
     },
     "AZURE_KEYVAULT_URI": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultUri.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultUri.value]"
     },
     "AZURE_KEYVAULT_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault'), '2025-04-01').outputs.vaultName.value]"
     },
     "AZURE_SEARCH_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.endpoint.value]"
     },
     "AZURE_SEARCH_SERVICE_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'search'), '2025-04-01').outputs.serviceName.value]"
     },
     "AZURE_APPINSIGHTS_CONNECTION_STRING": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.appInsightsConnectionString.value]"
     },
     "AZURE_LOG_ANALYTICS_WORKSPACE_ID": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring'), '2025-04-01').outputs.logAnalyticsId.value]"
     },
     "AZURE_FUNCTIONS_APP_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'functions'), '2025-04-01').outputs.appName.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'functions'), '2025-04-01').outputs.appName.value]"
     },
     "AGENT_IDENTITY_CLIENT_ID": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityClientId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityClientId.value]"
     },
     "WORKER_IDENTITY_CLIENT_ID": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityClientId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.workerIdentityClientId.value]"
     },
     "EVAL_IDENTITY_CLIENT_ID": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityClientId.value]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.evalIdentityClientId.value]"
+    },
+    "AGENT_RUNTIME_PRINCIPAL_ID": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'identity'), '2025-04-01').outputs.agentIdentityPrincipalId.value]"
     },
     "AZURE_FOUNDRY_HUB_NAME": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value]"
     },
     "AZURE_FOUNDRY_PROJECT_NAME": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectName.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectName.value]"
     },
     "AZURE_AI_SERVICES_ENDPOINT": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountEndpoint.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountEndpoint.value]"
     },
     "AZURE_AI_ACCOUNT_NAME": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.accountName.value]"
     },
     "AZURE_AI_PROJECT_NAME": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectName.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectName.value]"
     },
     "AZURE_AI_PROJECT_ID": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectId.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectId.value]"
     },
     "AZURE_AI_PROJECT_ENDPOINT": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value]"
     },
     "FOUNDRY_PROJECT_ENDPOINT": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.projectEndpoint.value]"
     },
     "AZURE_AI_MODEL_DEPLOYMENT_NAME": {
       "type": "string",
-      "value": "[if(parameters('deployFoundry'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.modelDeploymentName.value, '')]"
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'foundry'), '2025-04-01').outputs.modelDeploymentName.value]"
     }
   }
 }

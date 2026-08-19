@@ -1,7 +1,8 @@
 // intake-agent — Main Bicep orchestrator
-// Scope: subscription — creates resource group and delegates to modules.
-// Deploy via: azd provision
-targetScope = 'subscription'
+// Scope: existing resource group. Deploy via: azd provision.
+// The resource group is deliberately created out-of-band so the OIDC deployer
+// needs permissions only on rg-intake-dev, not across the subscription.
+targetScope = 'resourceGroup'
 
 // ---------------------------------------------------------------------------
 // Parameters
@@ -16,20 +17,12 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string
 
-@description('Object ID of the identity running the deployment (for KV access policy during bootstrap).')
-param principalId string = ''
-
-@description('Deploy a private Microsoft Foundry account, project, model and Standard Agent capability host.')
-param deployFoundry bool = false
+@minLength(1)
+@description('Object ID of the federated service principal running azd. Set AZURE_PRINCIPAL_ID; it is never inferred from an interactive user.')
+param principalId string
 
 @description('Deploy Azure Bot Service resource. Requires Microsoft.BotService provider registered + Teams publishing spike resolved.')
 param deployBotService bool = false
-
-@description('Deploy private endpoints and configure public network access. Set true only after connectivity spike confirms Foundry → private data-plane path.')
-param deployPrivateEndpoints bool = false
-
-@description('Deploy ONLY the storage blob private endpoint to enable in-VNet FC1 deployment (bypasses publicNetworkAccess:Disabled policy) without enabling all other PEs.')
-param deployStoragePrivateEndpoint bool = false
 
 @description('Override region for AI Search service only. eastus2 has been observed to have InsufficientResourcesAvailable for new AI Search services; set to eastus as fallback.')
 param searchServiceLocation string = 'eastus'
@@ -46,11 +39,20 @@ param tags object = {
 // Variables — deterministic unique token
 // ---------------------------------------------------------------------------
 
+// Private endpoints are not a toggle any more, they are the architecture.
+// Every data service below is publicNetworkAccess:Disabled with deny-by-default
+// ACLs, and the deployment pipeline reaches their data planes only from inside
+// the VNet. A `deployPrivateEndpoints=false` steady state would leave those
+// ACLs denying everything from a public path — an unsupported, internally
+// contradictory configuration — so the parameter is gone rather than
+// defaulted: ARM rejects the deployment outright if a caller still passes it.
+var deployPrivateEndpoints = true
+
 // Stable 13-char token scoped to subscription + environment + location.
 // Used as suffix for globally-unique resource names (storage, KV).
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
-var resourceGroupName = 'rg-intake-${environmentName}'
+var resourceGroupName = resourceGroup().name
 
 // Subnet ID constructed without referencing network module outputs to avoid circular dependency
 // (network module references storage for private endpoint DNS — storage needs functionsSubnetId for VNet rule)
@@ -63,23 +65,11 @@ var cosmosAccountName = 'cosmos-${take(resourceToken, 10)}'
 var serviceBusName = 'sb-${take(resourceToken, 12)}'
 var keyVaultName = 'kv-${take(resourceToken, 10)}jeg'
 var searchServiceName = 'srch-${take(resourceToken, 12)}'
-
-// ---------------------------------------------------------------------------
-// Resource group
-// ---------------------------------------------------------------------------
-
-resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
-  name: resourceGroupName
-  location: location
-  tags: tags
-}
-
 // ---------------------------------------------------------------------------
 // Monitoring — Log Analytics + Application Insights
 // ---------------------------------------------------------------------------
 
 module monitoring 'modules/monitoring.bicep' = {
-  scope: rg
   name: 'monitoring'
   params: {
     location: location
@@ -94,14 +84,13 @@ module monitoring 'modules/monitoring.bicep' = {
 // ---------------------------------------------------------------------------
 
 module network 'modules/network.bicep' = {
-  scope: rg
   name: 'network'
   params: {
     location: location
     tags: tags
     vnetName: 'vnet-intake-${environmentName}'
     deployPrivateEndpoints: deployPrivateEndpoints
-    deployStoragePrivateEndpoint: deployStoragePrivateEndpoint
+    deployStoragePrivateEndpoint: true
     cosmosAccountName: cosmosAccountName
     storageAccountName: storageAccountName
     searchServiceName: searchServiceName
@@ -114,7 +103,6 @@ module network 'modules/network.bicep' = {
 // ---------------------------------------------------------------------------
 
 module identity 'modules/identity.bicep' = {
-  scope: rg
   name: 'identity'
   params: {
     location: location
@@ -128,13 +116,11 @@ module identity 'modules/identity.bicep' = {
 // ---------------------------------------------------------------------------
 
 module keyvault 'modules/keyvault.bicep' = {
-  scope: rg
   name: 'keyvault'
   params: {
     location: location
     tags: tags
     keyVaultName: 'kv-${take(resourceToken, 16)}'
-    deployPrivateEndpoints: deployPrivateEndpoints
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
     deployerPrincipalId: principalId
   }
@@ -145,13 +131,11 @@ module keyvault 'modules/keyvault.bicep' = {
 // ---------------------------------------------------------------------------
 
 module storage 'modules/storage.bicep' = {
-  scope: rg
   name: 'storage'
   params: {
     location: location
     tags: tags
     storageAccountName: 'st${take(resourceToken, 10)}'
-    deployPrivateEndpoints: deployPrivateEndpoints
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
     evalIdentityPrincipalId: identity.outputs.evalIdentityPrincipalId
     functionsMIPrincipalId: identity.outputs.workerIdentityPrincipalId
@@ -165,7 +149,6 @@ module storage 'modules/storage.bicep' = {
 // ---------------------------------------------------------------------------
 
 module cosmos 'modules/cosmos.bicep' = {
-  scope: rg
   name: 'cosmos'
   params: {
     location: location
@@ -182,7 +165,6 @@ module cosmos 'modules/cosmos.bicep' = {
 // ---------------------------------------------------------------------------
 
 module servicebus 'modules/servicebus.bicep' = {
-  scope: rg
   name: 'servicebus'
   params: {
     location: location
@@ -198,7 +180,6 @@ module servicebus 'modules/servicebus.bicep' = {
 // ---------------------------------------------------------------------------
 
 module search 'modules/search.bicep' = {
-  scope: rg
   name: 'search'
   params: {
     location: searchServiceLocation
@@ -214,7 +195,6 @@ module search 'modules/search.bicep' = {
 // ---------------------------------------------------------------------------
 
 module functions 'modules/functions.bicep' = {
-  scope: rg
   name: 'functions'
   params: {
     location: location
@@ -245,7 +225,6 @@ module functions 'modules/functions.bicep' = {
 // ---------------------------------------------------------------------------
 
 module containerApps 'modules/container-apps.bicep' = {
-  scope: rg
   name: 'containerApps'
   params: {
     location: location
@@ -265,11 +244,10 @@ module containerApps 'modules/container-apps.bicep' = {
 }
 
 // ---------------------------------------------------------------------------
-// Azure AI Foundry (hub + project + AI Services) — gated
+// Azure AI Foundry (hub + project + AI Services) — always deployed
 // ---------------------------------------------------------------------------
 
-module foundry 'modules/foundry.bicep' = if (deployFoundry) {
-  scope: rg
+module foundry 'modules/foundry.bicep' = {
   name: 'foundry'
   params: {
     location: location
@@ -296,14 +274,13 @@ module foundry 'modules/foundry.bicep' = if (deployFoundry) {
   }
 }
 
-module foundryPrivateEndpoint 'modules/foundry-private-endpoint.bicep' = if (deployFoundry) {
-  scope: rg
+module foundryPrivateEndpoint 'modules/foundry-private-endpoint.bicep' = {
   name: 'foundryPrivateEndpoint'
   params: {
     location: location
     tags: tags
-    accountName: foundry!.outputs.accountName
-    accountId: foundry!.outputs.accountId
+    accountName: foundry.outputs.accountName
+    accountId: foundry.outputs.accountId
     privateEndpointSubnetId: network.outputs.peSubnetId
     foundryPrivateDnsZoneIds: [
       network.outputs.foundryServicesPrivateDnsZoneId
@@ -318,7 +295,6 @@ module foundryPrivateEndpoint 'modules/foundry-private-endpoint.bicep' = if (dep
 // ---------------------------------------------------------------------------
 
 module bot 'modules/bot.bicep' = if (deployBotService) {
-  scope: rg
   name: 'bot'
   params: {
     tags: tags
@@ -332,7 +308,7 @@ module bot 'modules/bot.bicep' = if (deployBotService) {
 
 output AZURE_LOCATION string = location
 output AZURE_TENANT_ID string = subscription().tenantId
-output AZURE_RESOURCE_GROUP string = rg.name
+output AZURE_RESOURCE_GROUP string = resourceGroupName
 
 output AZURE_COSMOS_ENDPOINT string = cosmos.outputs.endpoint
 output AZURE_COSMOS_DATABASE string = cosmos.outputs.databaseName
@@ -362,22 +338,14 @@ output AZURE_FUNCTIONS_APP_NAME string = functions.outputs.appName
 output AGENT_IDENTITY_CLIENT_ID string = identity.outputs.agentIdentityClientId
 output WORKER_IDENTITY_CLIENT_ID string = identity.outputs.workerIdentityClientId
 output EVAL_IDENTITY_CLIENT_ID string = identity.outputs.evalIdentityClientId
+output AGENT_RUNTIME_PRINCIPAL_ID string = identity.outputs.agentIdentityPrincipalId
 
-#disable-next-line BCP318
-output AZURE_FOUNDRY_HUB_NAME string = deployFoundry ? foundry.outputs.accountName : ''
-#disable-next-line BCP318
-output AZURE_FOUNDRY_PROJECT_NAME string = deployFoundry ? foundry.outputs.projectName : ''
-#disable-next-line BCP318
-output AZURE_AI_SERVICES_ENDPOINT string = deployFoundry ? foundry.outputs.accountEndpoint : ''
-#disable-next-line BCP318
-output AZURE_AI_ACCOUNT_NAME string = deployFoundry ? foundry.outputs.accountName : ''
-#disable-next-line BCP318
-output AZURE_AI_PROJECT_NAME string = deployFoundry ? foundry.outputs.projectName : ''
-#disable-next-line BCP318
-output AZURE_AI_PROJECT_ID string = deployFoundry ? foundry.outputs.projectId : ''
-#disable-next-line BCP318
-output AZURE_AI_PROJECT_ENDPOINT string = deployFoundry ? foundry.outputs.projectEndpoint : ''
-#disable-next-line BCP318
-output FOUNDRY_PROJECT_ENDPOINT string = deployFoundry ? foundry.outputs.projectEndpoint : ''
-#disable-next-line BCP318
-output AZURE_AI_MODEL_DEPLOYMENT_NAME string = deployFoundry ? foundry.outputs.modelDeploymentName : ''
+output AZURE_FOUNDRY_HUB_NAME string = foundry.outputs.accountName
+output AZURE_FOUNDRY_PROJECT_NAME string = foundry.outputs.projectName
+output AZURE_AI_SERVICES_ENDPOINT string = foundry.outputs.accountEndpoint
+output AZURE_AI_ACCOUNT_NAME string = foundry.outputs.accountName
+output AZURE_AI_PROJECT_NAME string = foundry.outputs.projectName
+output AZURE_AI_PROJECT_ID string = foundry.outputs.projectId
+output AZURE_AI_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
+output FOUNDRY_PROJECT_ENDPOINT string = foundry.outputs.projectEndpoint
+output AZURE_AI_MODEL_DEPLOYMENT_NAME string = foundry.outputs.modelDeploymentName

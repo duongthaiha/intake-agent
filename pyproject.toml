@@ -39,7 +39,8 @@ dev = [
     "types-jsonschema>=4.23",
     "ruff>=0.4",
     "import-linter>=2.1",
-    "coverage[toml]>=7.5",
+    "coverage>=7.5",
+    "bandit>=1.7.8,<2",
 ]
 devui = [
     "agent-framework-devui>=1.0.0b260813,<2",
@@ -84,20 +85,20 @@ packages = ["intake_domain", "intake_persistence", "intake_agent", "intake_worke
 # ---------------------------------------------------------------------------
 # Pytest
 # ---------------------------------------------------------------------------
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
-pythonpath = ["src"]
+# NOTE: pytest.ini is the authoritative pytest config (a top-level pytest.ini
+# takes precedence over [tool.pytest.ini_options] and pytest never reads
+# both). Do not add a [tool.pytest.ini_options] table here — it would be
+# silently ignored and would misrepresent the real configuration.
 
 # ---------------------------------------------------------------------------
 # Coverage
 # ---------------------------------------------------------------------------
-[tool.coverage.run]
-source = ["src"]
-omit = ["*/tests/*"]
-
-[tool.coverage.report]
-fail_under = 80
+# NOTE: .coveragerc is the single authoritative coverage config (source =
+# src/intake_domain, fail_under = 80, branch = True). coverage.py resolves
+# .coveragerc ahead of any [tool.coverage] table in this file, so a
+# [tool.coverage] table here would be silently ignored — do not add one.
+# The 80% gate applies specifically to intake_domain, matching
+# docs/quality/test-strategy.md, not to all of src/.
 
 # ---------------------------------------------------------------------------
 # Import-linter

@@ -2266,3 +2266,98 @@ All four required gaps were resolved. The smoke request was intentionally not
 submitted. `eval.yaml` now targets version 9; the installed Foundry azd
 extension does not expose an evaluation command, so no remote evaluation run
 was started from this runner.
+
+---
+
+## Section 36 — CI/CD Automation Contract Addendum (2026-08-19)
+
+**Status:** The workflow, infrastructure, bootstrap script, and operator runbook
+are implemented in this branch. The external GitHub, Entra, and Azure bootstrap
+has not yet been completed or validated, so the deploy workflow is not yet
+operational. This addendum does not alter or supersede the provisioning and
+validation evidence in Sections 1–35.
+
+**Scope:** CI/CD targets `dev` only. `test` and `prod` remain deferred and are
+not configured.
+
+### 36.1 Final architecture and trust boundaries
+
+- Steady-state [`infra/main.bicep`](../infra/main.bicep) is resource-group
+  scoped to the existing `rg-intake-dev` resource group. It excludes all
+  runner resources.
+- Runner resources are managed out of band by
+  [`scripts/azure/bootstrap-runner.sh`](../scripts/azure/bootstrap-runner.sh),
+  which invokes
+  [`infra/bootstrap-runner.bicep`](../infra/bootstrap-runner.bicep) in two
+  template stages: foundation resources with `deployRunnerJob=false`, then the
+  event-driven ACA Job with `deployRunnerJob=true` after the image exists.
+- The runner ACR is AAD-only (`adminUserEnabled=false`). First-image bootstrap
+  temporarily enables its public network path for ACR Tasks, while an
+  exit/signal trap guarantees restoration to `Disabled`; operators must verify
+  that state after bootstrap. No anonymous or admin-user registry access is
+  enabled.
+- The fine-grained, repository-scoped PAT is a secure Bicep input stored
+  directly as ACA Job secret `github-pat`. It is never a GitHub Actions secret,
+  Key Vault secret, committed value, or `.env` value. The bootstrap process
+  then `exec`s PID 1 with a clean allow-listed environment; only a short-lived
+  registration token crosses through a private temporary file, which is
+  deleted before the runner accepts a job.
+- The ACA runner is repository-scoped, carries label `aca-intake-dev`,
+  registers with `--ephemeral`, handles one job, and scales to zero. Its
+  user-assigned managed identity has `AcrPull` on the runner ACR only and has
+  no Azure deploy or application data-plane rights.
+- A root-owned job-started hook rejects every assigned job except this
+  repository's `deploy.yml` loaded from `refs/heads/main` for a
+  `workflow_run` or `workflow_dispatch` event.
+- Azure deployment uses GitHub OIDC. The deployer's `AZURE_CLIENT_ID` is its
+  application/client ID; required `AZURE_PRINCIPAL_ID` is the corresponding
+  service-principal **object ID** used by Bicep and RBAC checks.
+- `AZURE_RESOURCE_GROUP` is fixed by the workflow to `rg-intake-dev`; it is not
+  a configurable GitHub variable.
+- The workflow uses the SHA-pinned `Azure/setup-azd` v2 action and explicitly
+  installs the `microsoft.foundry` azd extension.
+- Post-deploy verification runs after `azd deploy` and is blocking. A failed
+  verification fails the deployment.
+
+### 36.2 OIDC subject and external controls
+
+The current Entra federated credential contract uses the plain GitHub
+Environment subject:
+
+```text
+repo:<owner>/<repository>:environment:dev
+```
+
+If GitHub immutable OIDC subjects are enabled later, the Entra federated
+credential must be updated concurrently to match the newly emitted exact
+subject. Otherwise OIDC token exchange will fail.
+
+The GitHub `dev` Environment now has a required reviewer and a `main`-only
+deployment branch policy. Fork pull-request workflows now require approval for
+all external contributors. External work still pending is: configure protected
+`main`; create/verify the federated credential and resource-group-scoped
+deployer RBAC in the target Azure tenant; populate all required non-secret
+variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+`AZURE_ENV_NAME`, `AZURE_LOCATION`, and `AZURE_PRINCIPAL_ID`); bootstrap the
+runner; and validate a complete approved run.
+
+### 36.3 Operations and recovery
+
+PAT rotation creates a replacement repository-scoped token, runs
+`bash scripts/azure/bootstrap-runner.sh --skip-image-build` with the replacement
+provided as `GITHUB_RUNNER_PAT`, validates that a queued labeled deployment is
+registered, completed, and deregistered, and only then revokes the old token.
+This updates the direct ACA Job secret without changing the workflow or code.
+
+Recovery is forward-only and follows final workflow behavior. Prefer a new PR
+that reverts faulty content. For a faster dev recovery, a manual dispatch from
+`main` may provide a full known-good commit SHA; the workflow accepts it only
+when it is an ancestor of `origin/main` and has a successful push-triggered CI
+run for that exact SHA. Environment approval, OIDC, the ephemeral runner, and
+blocking verification still apply. Routine `azd down` or resource-group
+teardown remains prohibited for recovery.
+
+**Operator reference:**
+[`docs/operations/cicd.md`](../docs/operations/cicd.md) contains the one-time
+foundation/bootstrap procedure, steady-state flow, variable table, PAT
+rotation, validation, troubleshooting, and forward-only recovery runbook.
