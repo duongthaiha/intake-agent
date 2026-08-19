@@ -50,6 +50,14 @@ fi
 TENANT_ID=$(az account show --subscription "$SUBSCRIPTION" --query tenantId -o tsv)
 info "Tenant: $TENANT_ID"
 
+if [[ -z "${MCP_SERVER_APP_CLIENT_ID:-}" ]]; then
+  fail "MCP_SERVER_APP_CLIENT_ID is required. Run scripts/azure/bootstrap-mcp-entra.sh first."
+elif [[ "$(az ad app show --id "$MCP_SERVER_APP_CLIENT_ID" --query signInAudience -o tsv 2>/dev/null || true)" == "AzureADMyOrg" ]]; then
+  info "Same-tenant MCP server app registration found"
+else
+  fail "MCP server app is unavailable or is not single-tenant (AzureADMyOrg)"
+fi
+
 # ---------------------------------------------------------------------------
 # Provider registrations
 # ---------------------------------------------------------------------------

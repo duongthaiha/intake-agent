@@ -4,9 +4,10 @@ Intake Agent captures an enterprise request through conversation, validates the
 required information, persists progress, and prepares the request for human
 review and downstream automation.
 
-The solution combines a Microsoft Foundry Hosted Agent with deterministic
-Python domain logic, durable Azure storage, event-driven Azure Functions, and
-Microsoft Teams integration assets.
+The target solution combines a Microsoft Foundry Hosted Agent with a private
+requester MCP service, deterministic Python domain logic, durable Azure storage,
+event-driven Azure Functions, and Microsoft Teams integration assets. The MCP
+boundary is approved in ADR-015 but is not yet asserted as deployed.
 
 ## Choose your path
 
@@ -112,9 +113,11 @@ Show the authoritative intake context and list every remaining gap.
 Submit this intake for review.
 ```
 
-The agent scopes state using Foundry's platform-provided user and conversation
-isolation. It does not accept caller identity, request IDs, or roles as model
-tool arguments.
+After the ADR-015 cutover, a versioned Foundry Toolbox passes the user's custom
+Entra OAuth token to the private requester MCP service. The MCP boundary derives
+identity only from validated `tid` and `oid` claims and trusted protocol
+metadata. It does not accept caller identity, request IDs, roles, correlation or
+idempotency IDs, or authorization decisions as model tool arguments.
 
 To start a new Foundry session while retaining durable intake state:
 
@@ -362,6 +365,15 @@ quality and Foundry evaluation configuration.
 - Access to the target private network for Hosted Agent code deployment and
   live verification
 
+The private requester MCP rollout additionally requires same-tenant Entra
+application registrations, the delegated `Intake.Tools.ReadWrite` scope, exact
+redirect URI, admin/tenant consent, a custom OAuth Foundry project connection,
+and a versioned Toolbox. These are tenant/Foundry setup, not
+resource-group-scoped Bicep resources. Current automation must not be assumed to
+create them. Follow the
+[private requester MCP runbook](docs/operations/requester-mcp.md) and collect
+every cutover-gate result before production routing.
+
 Check the installed Foundry tooling:
 
 ```powershell
@@ -488,6 +500,12 @@ User / approved channel
 Microsoft Foundry Hosted Agent (Responses protocol)
           |
           v
+Versioned Foundry Toolbox (custom Entra OAuth passthrough)
+          |
+          v
+Private requester MCP (internal Container Apps ingress)
+          |
+          v
 Deterministic intake domain and application services
           |
           +--> Cosmos DB: request state, templates, idempotency, atomic outbox
@@ -505,6 +523,7 @@ Repository packages:
 | `intake_domain` | Entities, validation, lifecycle, commands, events, protocols |
 | `intake_persistence` | In-memory and managed-identity Azure adapters |
 | `intake_agent` | Local API and Foundry Hosted Agent composition |
+| `intake_mcp` | Target private requester-tool transport and composition boundary; implementation pending |
 | `intake_workers` | Durable outbox dispatcher and Azure Functions trigger scaffolding |
 | `intake_teams` | Teams contracts, cards, parsing, auth boundary, and demo |
 
@@ -516,6 +535,8 @@ Read more:
 - [Package boundaries](docs/adr/ADR-012-package-module-boundaries.md)
 - [Domain lifecycle](docs/adr/ADR-013-domain-entities-and-vertical-flow.md)
 - [Teams integration boundary](docs/adr/ADR-014-teams-integration-boundary.md)
+- [Private requester MCP decision](docs/adr/ADR-015-private-requester-mcp-boundary.md)
+- [Private requester MCP operations](docs/operations/requester-mcp.md)
 - [Repository interfaces](docs/contracts/repository-interfaces.md)
 - [Deployment evidence](.azure/deployment-plan.md)
 
@@ -527,8 +548,12 @@ Read more:
   keys, connection strings, or Service Bus SAS policies.
 - Deployed environments fail startup if any persistence backend is configured
   as `inmemory`.
-- The Hosted Agent trusts Foundry isolation context, not model-supplied
-  identity or authorization fields.
+- The target requester MCP trusts only validated same-tenant delegated token
+  claims and trusted protocol metadata, not model-supplied identity,
+  authorization, request, correlation, or idempotency fields.
+- The delegated token authorizes the operation but never accesses Cosmos, Blob,
+  or Service Bus. A separate MCP managed identity performs data access.
+- Deployed environments have no silent MCP/OAuth-to-local fallback.
 - Every mutation uses optimistic concurrency and idempotency controls.
 - Teams production authentication fails closed until the real tenant token
   validation and publishing configuration is complete.
@@ -553,6 +578,20 @@ Check:
 - The identity has Cosmos DB Built-in Data Contributor, Storage Blob Data
   Contributor/Delegator as required, and Service Bus Sender permissions.
 - `INTAKE_HOSTED_TENANT_ID` is set.
+
+Before MCP cutover these checks describe the current in-process deployment.
+After cutover, the Hosted Agent must not retain requester data-plane roles; check
+the Toolbox connection/version instead and check the MCP identity for durable
+backend access.
+
+### Toolbox consent or private MCP invocation fails
+
+Confirm the user, Foundry project, OAuth client, and MCP resource application
+are in the same tenant; verify issuer, audience, delegated scope, consent,
+Toolbox version, private DNS/TLS, and MCP readiness. Do not enable public
+ingress, weaken token validation, forward the token to Azure data services, or
+fall back to the local adapter. See
+[the MCP runbook](docs/operations/requester-mcp.md).
 
 ### Cosmos writes fail or transactional batches are rejected
 

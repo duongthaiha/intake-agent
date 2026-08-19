@@ -1,6 +1,34 @@
 # Infrastructure Configuration Outputs
 
-Each runtime reads configuration from environment variables. No secrets are stored in config — all service authentication uses managed identity.
+Each runtime reads configuration from environment variables. No secrets are stored in config — Azure data-plane authentication uses managed identity. The Foundry custom OAuth client credential is stored only in an approved Foundry project connection/secret store, not application environment configuration.
+
+> **ADR-015 status:** Bicep, `azure.yaml`, runtime code, and guarded deployment
+> automation emit and consume the implemented values below. Tenant-scoped Entra
+> applications and the secure Foundry OAuth connection/Toolbox still require
+> the separately governed bootstrap and verification procedure.
+
+## Private requester MCP target environment
+
+| Variable | Description |
+|---|---|
+| `INTAKE_MCP_ENDPOINT` | Private streamable-HTTP endpoint; non-secret |
+| `INTAKE_MCP_TENANT_ID` | Exact allowed Entra tenant |
+| `INTAKE_MCP_ISSUER` | Exact allowed token issuer |
+| `INTAKE_MCP_AUDIENCE` | MCP resource application client-ID GUID (`aud` for Entra v2 access tokens) |
+| `INTAKE_MCP_REQUIRED_SCOPE` | Versioned delegated scope, initially `Intake.Tools.ReadWrite` |
+| `INTAKE_MCP_TOOLBOX_SERVER_LABEL` | Exact Toolbox MCP server label used to qualify allowed tools |
+| `INTAKE_MCP_CONTRACT_VERSION` | MCP/tool schema contract emitted by the server |
+| `INTAKE_MCP_SUPPORTED_AGENT_RANGE` | Compatible Hosted Agent contract range |
+| `AZURE_CLIENT_ID` | Dedicated MCP UAMI client ID for Azure data access |
+
+Token signature/JWKS, issuer, `tid`, audience, lifetime, and delegated scope are
+validated before `ActorContext` creation. Identity comes only from validated
+`tid` and `oid`; bounded conversation/correlation/idempotency values come only
+from trusted protocol metadata. There is no deployed fallback to a local or
+in-process actor.
+
+The MCP OAuth credential is deliberately absent from this table. It is managed
+by the approved Foundry project connection/secret facility.
 
 ## Hosted Agent (`intake_agent`) environment
 
@@ -81,7 +109,9 @@ in place; application code must not hard-code either physical queue name.
 
 | Runtime identity | Resource scope | Role |
 |------------------|----------------|------|
-| Hosted Agent UAMI | Cosmos `/dbs/intake` | Cosmos DB Built-in Data Contributor |
+| Requester MCP UAMI | Cosmos `/dbs/intake` | Cosmos DB Built-in Data Contributor |
+| Requester MCP UAMI | `domain-events-durable` queue | Azure Service Bus Data Sender |
+| Requester MCP UAMI | `request-artifacts` container | Storage Blob Data Contributor |
 | Artifact-writing runtime UAMI | `request-artifacts` container | Storage Blob Data Contributor |
 | Artifact URL-signing runtime UAMI | Storage account | Storage Blob Delegator |
 | Worker UAMI | Cosmos `/dbs/intake` | Cosmos DB Built-in Data Contributor |
@@ -99,6 +129,14 @@ Every non-local runtime must set `AZURE_CLIENT_ID` to its user-assigned managed
 identity client ID. The worker dispatcher accepts either
 `INTAKE_SERVICEBUS_NAMESPACE` or the Functions identity-binding setting
 `INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace`.
+
+The steady-state template grants requester data access only to the MCP UAMI.
+Upgraded environments can retain legacy Hosted Agent role assignments because
+incremental ARM deployments do not delete them. The guarded postdeploy cutover
+removes those assignments only after delegated-user verification and explicit
+`MCP_DATA_PLANE_CUTOVER_APPROVED=true`; then negatively verify the Hosted Agent
+cannot read or write requester stores. Worker identities and roles do not
+change. The delegated user token never authenticates to these Azure resources.
 
 ## Worker deployment package contract
 
@@ -158,6 +196,14 @@ services:
       INTAKE_COSMOS_ENDPOINT: ${AZURE_COSMOS_ENDPOINT}
       # ...
 ```
+
+For ADR-015, resource-group-scoped Bicep may emit only non-secret Azure resource
+configuration such as the private endpoint, MCP UAMI client ID, and deployed
+contract/image version. Entra application registrations, service principals,
+delegated scopes, preauthorization, redirect URIs, and consent grants are
+tenant-scoped and are not Bicep outputs. A separately governed, idempotent
+procedure must configure and evidence them. Until executable automation exists,
+do not claim `azd provision` performs this setup.
 
 ## Local development overrides
 

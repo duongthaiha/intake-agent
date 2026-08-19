@@ -24,6 +24,22 @@ param principalId string
 @description('Deploy Azure Bot Service resource. Requires Microsoft.BotService provider registered + Teams publishing spike resolved.')
 param deployBotService bool = false
 
+@minLength(1)
+@description('Application (client) ID of the tenant-scoped MCP server app registration. Bootstrap it before azd provision.')
+param mcpServerAppClientId string
+
+@minLength(1)
+@description('Name of the secure custom OAuth connection created in the Foundry project.')
+param mcpOAuthConnectionName string
+
+@minLength(1)
+@description('Versioned Foundry Toolbox name that exposes the MCP tools.')
+param mcpToolboxName string
+
+@minLength(1)
+@description('Foundry Toolbox MCP server label used to namespace requester tool names.')
+param mcpToolboxServerLabel string
+
 @description('Override region for AI Search service only. eastus2 has been observed to have InsufficientResourcesAvailable for new AI Search services; set to eastus as fallback.')
 param searchServiceLocation string = 'eastus'
 
@@ -139,6 +155,7 @@ module storage 'modules/storage.bicep' = {
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
     evalIdentityPrincipalId: identity.outputs.evalIdentityPrincipalId
     functionsMIPrincipalId: identity.outputs.workerIdentityPrincipalId
+    mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId
     functionsSubnetId: functionsSubnetId
   }
   dependsOn: [network]
@@ -155,7 +172,7 @@ module cosmos 'modules/cosmos.bicep' = {
     tags: tags
     accountName: 'cosmos-${take(resourceToken, 10)}'
     deployPrivateEndpoints: deployPrivateEndpoints
-    agentIdentityPrincipalId: identity.outputs.agentIdentityPrincipalId
+    mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
   }
 }
@@ -170,7 +187,7 @@ module servicebus 'modules/servicebus.bicep' = {
     location: location
     tags: tags
     namespaceName: serviceBusName
-    agentIdentityPrincipalId: identity.outputs.agentIdentityPrincipalId
+    mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId
     workerIdentityPrincipalId: identity.outputs.workerIdentityPrincipalId
   }
 }
@@ -235,9 +252,21 @@ module containerApps 'modules/container-apps.bicep' = {
     logAnalyticsSharedKey: monitoring.outputs.logAnalyticsSharedKey
     evalIdentityId: identity.outputs.evalIdentityId
     evalIdentityClientId: identity.outputs.evalIdentityClientId
+    mcpIdentityId: identity.outputs.mcpIdentityId
+    mcpIdentityClientId: identity.outputs.mcpIdentityClientId
     storageEndpoint: storage.outputs.blobEndpoint
     evalContainer: storage.outputs.evalContainer
+    cosmosEndpoint: cosmos.outputs.endpoint
+    cosmosDatabase: cosmos.outputs.databaseName
+    cosmosRequestsContainer: cosmos.outputs.requestsContainerName
+    cosmosTemplatesContainer: cosmos.outputs.templatesContainerName
+    cosmosIdempotencyContainer: cosmos.outputs.idempotencyContainerName
+    serviceBusNamespace: servicebus.outputs.namespaceFqdn
+    serviceBusQueue: servicebus.outputs.queueName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    mcpAudience: mcpServerAppClientId
+    mcpScope: 'Intake.Tools.ReadWrite'
+    tenantId: subscription().tenantId
     subnetId: network.outputs.containerAppsSubnetId
     environmentNameTag: environmentName
   }
@@ -339,6 +368,17 @@ output AGENT_IDENTITY_CLIENT_ID string = identity.outputs.agentIdentityClientId
 output WORKER_IDENTITY_CLIENT_ID string = identity.outputs.workerIdentityClientId
 output EVAL_IDENTITY_CLIENT_ID string = identity.outputs.evalIdentityClientId
 output AGENT_RUNTIME_PRINCIPAL_ID string = identity.outputs.agentIdentityPrincipalId
+output MCP_IDENTITY_CLIENT_ID string = identity.outputs.mcpIdentityClientId
+output MCP_RUNTIME_PRINCIPAL_ID string = identity.outputs.mcpIdentityPrincipalId
+
+output INTAKE_MCP_ENDPOINT string = containerApps.outputs.mcpEndpoint
+output INTAKE_MCP_FQDN string = containerApps.outputs.mcpFqdn
+output INTAKE_MCP_AUDIENCE string = mcpServerAppClientId
+output INTAKE_MCP_REQUIRED_SCOPE string = 'Intake.Tools.ReadWrite'
+output AZURE_MCP_CONTAINER_APP_NAME string = containerApps.outputs.mcpAppName
+output MCP_OAUTH_CONNECTION_NAME string = mcpOAuthConnectionName
+output MCP_TOOLBOX_NAME string = mcpToolboxName
+output MCP_TOOLBOX_SERVER_LABEL string = mcpToolboxServerLabel
 
 output AZURE_FOUNDRY_HUB_NAME string = foundry.outputs.accountName
 output AZURE_FOUNDRY_PROJECT_NAME string = foundry.outputs.projectName

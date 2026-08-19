@@ -4,7 +4,7 @@ targetScope = 'resourceGroup'
 param location string
 param tags object
 param namespaceName string
-param agentIdentityPrincipalId string
+param mcpIdentityPrincipalId string
 param workerIdentityPrincipalId string
 
 // ---------------------------------------------------------------------------
@@ -121,12 +121,12 @@ var sbDataSenderRoleId = '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39'
 // "Identity-based connections" section.
 var sbDataOwnerRoleId = '090c5cfd-751d-490a-894a-3ce6f1109419'
 
-resource agentSbSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(sbNamespace.id, agentIdentityPrincipalId, sbDataSenderRoleId)
+resource mcpSbSender 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(sbNamespace.id, mcpIdentityPrincipalId, sbDataSenderRoleId)
   scope: sbNamespace
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', sbDataSenderRoleId)
-    principalId: agentIdentityPrincipalId
+    principalId: mcpIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
 }

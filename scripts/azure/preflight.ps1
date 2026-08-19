@@ -31,6 +31,13 @@ if ($subState -eq "Enabled") {
 } else {
   Write-Fail "Subscription state: $subState"
 }
+if (-not $env:MCP_SERVER_APP_CLIENT_ID) {
+  Write-Fail "MCP_SERVER_APP_CLIENT_ID is required. Run scripts/azure/bootstrap-mcp-entra.ps1 first."
+} else {
+  $audience = az ad app show --id $env:MCP_SERVER_APP_CLIENT_ID --query signInAudience -o tsv 2>$null
+  if ($audience -eq "AzureADMyOrg") { Write-Info "Same-tenant MCP server app registration found" }
+  else { Write-Fail "MCP server app is unavailable or is not single-tenant (AzureADMyOrg)" }
+}
 
 Write-Sect "2. Provider Registrations"
 # Foundry is provisioned unconditionally by infra/main.bicep (the dead

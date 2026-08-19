@@ -6,7 +6,7 @@ param location string
 param tags object
 param accountName string
 param deployPrivateEndpoints bool
-param agentIdentityPrincipalId string
+param mcpIdentityPrincipalId string
 param workerIdentityPrincipalId string
 
 // ---------------------------------------------------------------------------
@@ -207,12 +207,12 @@ resource workflowEventsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatab
 
 var cosmosDataContributorRoleDefId = '${cosmosAccount.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002'
 
-resource agentCosmosRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+resource mcpCosmosRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
   parent: cosmosAccount
-  name: guid(cosmosAccount.id, agentIdentityPrincipalId, '00000000-0000-0000-0000-000000000002')
+  name: guid(cosmosAccount.id, mcpIdentityPrincipalId, '00000000-0000-0000-0000-000000000002')
   properties: {
     roleDefinitionId: cosmosDataContributorRoleDefId
-    principalId: agentIdentityPrincipalId
+    principalId: mcpIdentityPrincipalId
     scope: cosmosAccount.id
   }
 }
