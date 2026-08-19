@@ -10,7 +10,7 @@ The central design rule is:
 
 > The language model may interpret and propose, but deterministic code authorizes, validates, persists, and changes state.
 
-A Python Hosted Agent is deployed as a modular monolith. Its model-facing orchestration layer coordinates the conversation, while internal application and domain layers own templates, validation rules, lifecycle transitions, request-level authorization, approvals, idempotency, persistence, and audit history. These deterministic layers run in the same Hosted Agent process but cannot be bypassed by model-generated tool arguments. Azure Cosmos DB stores request data, Azure Blob Storage stores generated artifacts, Azure Service Bus decouples background work, and Azure Functions process documents, notifications, evaluations, and downstream deliveries.
+A Python Hosted Agent coordinates the conversation. Its four requester tools cross a private streamable-HTTP MCP boundary through a versioned Microsoft Foundry Toolbox with custom Entra OAuth identity passthrough. The MCP server runs in the existing Container Apps managed environment and composes the deterministic application/domain package and Azure persistence adapters. Review and worker commands remain outside this requester surface. Azure Cosmos DB stores request data, Azure Blob Storage stores generated artifacts, Azure Service Bus decouples background work, and Azure Functions process documents, notifications, evaluations, and downstream deliveries.
 
 ## 2. Scope
 
@@ -116,7 +116,12 @@ flowchart LR
         subgraph Foundry["Microsoft Foundry"]
             App[Agent Application<br/>Activity Protocol]
             Agent[Python Hosted Intake Agent]
+            Toolbox[Versioned Toolbox<br/>custom OAuth passthrough]
             Eval[Foundry tracing and evaluation]
+        end
+
+        subgraph RequesterPlane["Existing Container Apps managed environment"]
+            MCP[Private requester MCP<br/>internal ingress]
         end
 
         subgraph AppPlane["Asynchronous application plane"]
@@ -142,10 +147,12 @@ flowchart LR
     Teams <--> Bot
     Bot <--> App
     App --> Agent
+    Agent --> Toolbox
+    Toolbox -->|Delegated Entra token| MCP
     Agent -->|Foundry-managed search tool| Search
-    Agent <--> Cosmos
-    Agent --> Bus
-    DomainPackage -. bundled into .-> Agent
+    MCP <--> Cosmos
+    MCP --> Bus
+    DomainPackage -. bundled into .-> MCP
     DomainPackage -. bundled into .-> Workers
     Workers <--> Bus
     Workers <--> Cosmos
@@ -156,6 +163,7 @@ flowchart LR
     Workers --> Vault
     Agent --> Eval
     Agent --> Monitor
+    MCP --> Monitor
     Workers --> Monitor
     Eval --> Monitor
 ```
@@ -203,7 +211,9 @@ The Hosted Agent does not:
 
 On every conversation turn, before interpreting the next action, the orchestration layer invokes `get_request_context`. The persisted request aggregate is always authoritative; Foundry conversation state is ephemeral transcript context and is never used as the source of truth for fields, lifecycle, permissions, or the current revision. This rehydration rule resolves divergence after retries, session loss, or partial platform failure.
 
-The Hosted Agent's channel adapter extracts user and tenant identifiers from authenticated Activity metadata and creates an immutable request context outside the model-controlled argument payload. Internal command handlers accept actor context only from this adapter. They never trust a user ID generated or supplied by the model. If the selected downstream resource requires delegated user authorization, the adapter acquires an On-Behalf-Of token and the integration validates it. Confirming the exact Activity claims and OBO support is a production architecture gate and an early technical spike.
+For requester tools, Foundry Toolbox performs custom OAuth identity passthrough to the private MCP endpoint. The MCP boundary validates signature, exact issuer and tenant, MCP application audience, lifetime, and the required delegated scope before deriving immutable actor identity from `tid` and `oid`. It accepts no caller- or model-supplied user, tenant, role, request, correlation, idempotency, or authorization values. Trusted protocol metadata supplies bounded conversation, correlation, and idempotency context. Missing or conflicting context fails closed.
+
+The delegated token authorizes the product operation and stops at the MCP boundary. A separate MCP managed identity accesses Cosmos DB, Blob Storage, and Service Bus. It is never forwarded to those services. The user, app registrations, and Foundry project are same-tenant; consent-required is explicit and never falls back to app-only or shared identity.
 
 Every invocation carries:
 
@@ -214,22 +224,22 @@ Every invocation carries:
 - Correlation and idempotency identifiers.
 - Agent, prompt, model, tool, template, and schema versions.
 
-### 7.3 Hosted Agent internal architecture
+### 7.3 Hosted Agent and requester tool architecture
 
-The Hosted Agent is one deployment unit with explicit internal boundaries:
+The requester tool facade is a separate private deployment with explicit
+transport-neutral boundaries:
 
 ```mermaid
 flowchart LR
-    Activity[Authenticated Activity] --> Adapter[Channel and identity adapter]
-    Adapter --> Orchestrator[Conversation orchestrator]
+    Activity[Authenticated Activity] --> Orchestrator[Conversation orchestrator]
     Model[Foundry model] <--> Orchestrator
-    Orchestrator --> Commands[Typed command handlers]
+    Orchestrator --> Toolbox[Versioned Foundry Toolbox]
+    Toolbox -->|Custom OAuth delegated token| Auth[MCP auth boundary]
+    Auth --> Commands[Requester tool port]
     Commands --> Domain[Deterministic domain layer]
     Domain --> Repositories[Repository and outbox layer]
     Repositories <--> Cosmos[(Cosmos DB)]
     Repositories --> Bus[Service Bus]
-    Orchestrator --> Presenter[Response presenter]
-    Presenter --> ActivityOut[Activity response]
 ```
 
 The application and domain layers:
@@ -248,9 +258,13 @@ The application and domain layers:
 - Outbox event creation in the same logical update as domain state.
 - Idempotency for all mutating commands.
 
-Combining these layers with the Hosted Agent removes an HTTP hop, a deployment, and a second runtime identity. Safety is preserved through code-level dependency direction: the model-facing orchestrator can invoke typed command handlers, but it cannot obtain repository instances, credentials, or mutable identity context. Domain and repository modules remain independently unit- and component-testable.
-
-Extract these modules into a separate service only when another channel or API needs the same commands, domain and agent scaling differ materially, releases require independent cadence, or compliance requires a separate process or network trust boundary.
+The private MCP server exposes only `get_intake_context`,
+`update_intake_field`, `submit_intake_for_review`, and
+`list_my_intake_requests`. The model-facing orchestrator cannot obtain
+repositories, data-plane credentials, mutable identity, reviewer operations, or
+generic MCP execution. The original extraction condition is now met by the
+required reusable consumer boundary. ADR-015 therefore supersedes ADR-003 and
+ADR-009 only for these four requester tools.
 
 #### Package and dependency boundaries
 
@@ -288,7 +302,9 @@ Command schemas reject unknown properties and enforce bounded payload sizes. Res
 
 `get_or_create_request` uses a deterministic document identifier derived from tenant ID and Teams conversation ID and a conditional create. Concurrent first messages therefore resolve to one request rather than creating duplicate drafts.
 
-An Azure Functions MCP endpoint can expose future cross-agent or shared enterprise tools. Domain request commands remain private Python interfaces unless MCP demonstrably improves governance without widening access.
+The four requester commands are exposed only through the private, allow-listed
+MCP contract in ADR-015. Other domain commands remain private Python interfaces
+unless a separate architecture and security decision approves their exposure.
 
 Service-only commands are not exposed to the model:
 
@@ -670,7 +686,8 @@ Consumers ignore unknown additive fields, reject unsupported major event version
 | Actor | Identity | Use |
 |---|---|---|
 | Teams user | Microsoft Entra user identity | Interactive request and review actions |
-| Hosted Intake Agent | Dedicated Foundry agent identity | Cosmos DB, Service Bus, Azure AI Search, monitoring, and attributable actions |
+| Hosted Intake Agent | Dedicated Foundry agent identity | Foundry/Toolbox consumption, approved Search reads, monitoring, and attributable orchestration |
+| Requester MCP | Delegated Entra user token plus dedicated managed identity | Authorize requester operations as the user; access Cosmos DB, Blob Storage, and Service Bus as the workload |
 | Document worker | Dedicated managed identity | Consume document jobs, write artifacts, and invoke artifact-result commands |
 | Notification worker | Dedicated Entra application and workload identity | Consume notification jobs and call Microsoft Graph with approved RSC |
 | Integration worker | Dedicated managed identity per integration trust boundary | Consume deliveries, call approved target, and invoke delivery-result commands |
@@ -681,13 +698,18 @@ Consumers ignore unknown additive fields, reject unsupported major event version
 
 The interactive pattern is used for user-driven actions. On-Behalf-Of is used only when a downstream resource must apply the user's delegated permissions. System-wide background work uses a dedicated workload identity with narrowly scoped application permissions.
 
-For commands, two independently protected actor values are recorded: the authenticated Foundry agent identity is the workload, and the verified Teams/Entra user from channel metadata is the represented user. Model-generated arguments cannot set or override either value. The identity-propagation spike must prove this behavior before requester or reviewer authorization is enabled.
+For requester commands, independently protected actor values are recorded: the
+validated delegated Entra user is the represented user and the authenticated MCP
+managed identity is the data-access workload. Model/tool arguments cannot set or
+override either value. Reviewer commands retain their separate channel and
+authorization gate.
 
 ### 12.2 Least-privilege resource access
 
 | Identity | Minimum data-plane access |
 |---|---|
-| Hosted Agent | Cosmos DB Built-in Data Contributor scoped to product databases/containers; Service Bus Data Sender scoped to the domain-event entity; Search Index Data Reader on the approved search service; monitoring ingestion |
+| Hosted Agent | Foundry/Toolbox consumption; Search Index Data Reader on approved indexes where the Foundry-managed search tool requires it; monitoring ingestion |
+| Requester MCP | Cosmos DB Built-in Data Contributor scoped to product databases/containers; Service Bus Data Sender scoped to the domain-event entity; Blob roles only when an approved requester operation requires them; monitoring ingestion |
 | Outbox dispatcher | Read/update product outbox records and Service Bus Data Sender |
 | Document worker | Service Bus Data Receiver, Blob Data Contributor on request artifacts, and product-container access required by service-only commands |
 | Notification worker | Service Bus Data Receiver and approved Microsoft Graph `TeamsActivity.Send.User` RSC |
@@ -695,7 +717,12 @@ For commands, two independently protected actor values are recorded: the authent
 | Evaluation job | Read-only benchmark storage, write-only evidence path where practical, and permission to invoke the test Agent Application |
 | Retention worker | Delete access only to stores covered by the approved retention workflow |
 
-The Hosted Agent has no access to Foundry-owned Cosmos DB containers, no Service Bus receiver role, and no Key Vault secret access by default. Exceptional non-Entra credentials belong to the specific worker that needs them and are read from Key Vault under a separate identity.
+The Hosted Agent has no requester data-plane role after MCP cutover. The MCP
+identity has no access to Foundry-owned Cosmos DB containers, no Service Bus
+receiver role, and no Key Vault secret access by default. Delegated user tokens
+are not sent to Azure data services. Exceptional non-Entra credentials belong
+to the specific worker that needs them and are read from Key Vault under a
+separate identity.
 
 ### 12.3 Role model
 
@@ -747,7 +774,13 @@ Entra groups or app roles provide coarse roles. The Hosted Agent's deterministic
 
 Development, test, and production use separate Foundry projects and separate application/data resources. Production should use a separate subscription where enterprise policy requires a stronger trust boundary.
 
-Resource naming, tags, diagnostics, RBAC, budgets, locks, and policies are deployed with Bicep. GitHub Actions uses workload identity federation.
+Resource naming, tags, diagnostics, Azure RBAC, budgets, locks, and policies are
+deployed with Bicep. GitHub Actions uses workload identity federation. Entra
+application registrations, delegated scopes, redirect URIs, preauthorization,
+and tenant/admin consent are tenant-scoped and are not resources owned by the
+resource-group-scoped Bicep deployment. They require a separately governed,
+idempotent setup procedure and redacted evidence; documentation does not imply
+that procedure is implemented.
 
 Bicep is the infrastructure source of truth, and Azure Developer CLI (`azd`) is the shared deployment contract for developers and automation. The repository contains `azure.yaml` and an `infra/` folder; `azd provision`, `azd deploy`, and `azd up` respectively provision infrastructure, deploy application components, and perform the clean-environment end-to-end deployment. GitHub Actions authenticates through workload identity federation and invokes the same Bicep/`azd` contract rather than maintaining a separate deployment implementation. Secrets are never stored in committed parameter files or `azd` environment files.
 
@@ -757,9 +790,10 @@ Bicep is the infrastructure source of truth, and Azure Developer CLI (`azd`) is 
 flowchart TB
     Teams[Teams] --> Bot[Azure Bot Service]
     Bot -->|Authenticated public endpoint| Foundry[Foundry Agent Application]
-    Foundry --> Agent[Hosted Agent]
+    Foundry --> Agent[Hosted Agent and Toolbox]
+    Agent --> MCP[Private requester MCP<br/>existing ACA environment]
 
-    Agent --> PE[Private Endpoints]
+    MCP --> PE[Private Endpoints]
     Worker[Functions workers] --> PE
     EvalJob[Container Apps evaluation job] --> PE
     PE --> Cosmos[(Cosmos DB)]
@@ -773,7 +807,8 @@ Characteristics:
 
 - Foundry ingress remains public but requires Microsoft Entra and tenant authorization.
 - Customer-owned data services use private endpoints and public network access disabled where supported.
-- The Hosted Agent uses its dedicated identity for data and messaging access; no second application ingress is exposed.
+- The private requester MCP uses internal ingress and a dedicated data-plane
+  identity; the Hosted Agent uses its identity for Foundry/Toolbox.
 - Native Foundry portal publishing is available for pilots; production downloads and customizes the generated manifest for notifications and enterprise app policy.
 - This is the preferred pilot topology when compliance permits.
 
@@ -786,6 +821,7 @@ flowchart TB
 
     subgraph VNet["BYO virtual network"]
         HostedSubnet[Delegated hosted-agent subnet]
+        MCP[Private requester MCP<br/>existing ACA environment]
         FunctionSubnet[Functions integration subnet]
         JobSubnet[Container Apps jobs environment]
         PE[Private endpoint subnet]
@@ -793,7 +829,8 @@ flowchart TB
     end
 
     PrivateFoundry --> HostedSubnet
-    HostedSubnet --> PE
+    HostedSubnet --> MCP
+    MCP --> PE
     FunctionSubnet --> PE
     JobSubnet --> PE
     PE --> Data[Cosmos DB, Storage, Search,<br/>Service Bus, Key Vault, Monitor]
@@ -1026,15 +1063,16 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 |---|---|---|
 | ADR-001 | Use native Foundry publishing to Teams; do not build a custom bot host for MVP | Accepted |
 | ADR-002 | Use a Python Hosted Agent rather than a prompt-only agent | Accepted |
-| ADR-003 | Deploy orchestration and deterministic core modules together as a Hosted Agent modular monolith | Accepted |
+| ADR-003 | Deploy orchestration and deterministic core modules together as a Hosted Agent modular monolith | Superseded by ADR-015 for requester tools only |
 | ADR-004 | Use Foundry standard setup with customer-owned data resources | Accepted |
 | ADR-005 | Use Cosmos DB request partitions, optimistic concurrency, audit events, and an outbox | Proposed |
 | ADR-006 | Use Service Bus and Functions for asynchronous work | Proposed |
 | ADR-007 | Pin approved production agent versions | Accepted |
 | ADR-008 | Support baseline and hardened deployment variants until compliance selects one | Accepted |
-| ADR-009 | Extract a Core service only for additional consumers, materially different scaling/release needs, or a required process trust boundary | Accepted |
+| ADR-009 | Extract a Core service only for additional consumers, materially different scaling/release needs, or a required process trust boundary | Superseded by ADR-015 for requester tools only |
 | ADR-010 | Build the deterministic core as a private `intake-domain` package bundled into the Hosted Agent and state-changing workers | Accepted |
 | ADR-011 | Use Bicep as the infrastructure source of truth and Azure Developer CLI (`azd`) as the shared local and CI/CD deployment contract | Accepted |
+| ADR-015 | Extract the four requester tools behind a private Container Apps MCP boundary consumed through a versioned Foundry Toolbox with custom Entra OAuth passthrough | Accepted; supersedes ADR-003/ADR-009 for requester tools only and preserves ADR-010 |
 
 ## 22. Risks and mitigations
 

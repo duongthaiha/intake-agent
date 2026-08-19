@@ -11,6 +11,18 @@
     "principalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
     },
+    "mcpServerAppClientId": {
+      "value": "${MCP_SERVER_APP_CLIENT_ID}"
+    },
+    "mcpOAuthConnectionName": {
+      "value": "${MCP_OAUTH_CONNECTION_NAME}"
+    },
+    "mcpToolboxName": {
+      "value": "${MCP_TOOLBOX_NAME}"
+    },
+    "mcpToolboxServerLabel": {
+      "value": "${MCP_TOOLBOX_SERVER_LABEL}"
+    },
     "deployBotService": {
       "value": false
     }

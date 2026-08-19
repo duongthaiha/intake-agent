@@ -78,7 +78,19 @@ if ($serviceBus) {
 
 Sect "Application and identities"
 Check "Function App is Running" { if ((az functionapp show -g $ResourceGroup -n "func-intake-$EnvName" --query state -o tsv) -ne "Running") { throw } }
-foreach ($identity in "agent","worker","eval","notify","runner") { Check "Managed identity id-intake-$identity-$EnvName" { az identity show -g $ResourceGroup -n "id-intake-$identity-$EnvName" } }
+foreach ($identity in "agent","worker","eval","notify","mcp","runner") { Check "Managed identity id-intake-$identity-$EnvName" { az identity show -g $ResourceGroup -n "id-intake-$identity-$EnvName" } }
+$mcpAppName = $env:AZURE_MCP_CONTAINER_APP_NAME
+if (-not $mcpAppName) { $mcpAppName = Get-AzdEnvValue "AZURE_MCP_CONTAINER_APP_NAME" }
+$mcpFqdn = $env:INTAKE_MCP_FQDN
+if (-not $mcpFqdn) { $mcpFqdn = Get-AzdEnvValue "INTAKE_MCP_FQDN" }
+if ($mcpAppName) {
+  $mcp = az containerapp show -g $ResourceGroup -n $mcpAppName -o json | ConvertFrom-Json
+  if (-not $mcp.properties.configuration.ingress.external) { Pass "MCP Container App ingress is internal-only" } else { Fail "MCP Container App ingress is not internal-only" }
+  if ($mcp.properties.latestReadyRevisionName -and $mcp.properties.latestReadyRevisionName -eq $mcp.properties.latestRevisionName) { Pass "MCP latest revision is ready" } else { Fail "MCP latest revision is not ready" }
+} else { Fail "AZURE_MCP_CONTAINER_APP_NAME unavailable" }
+if ($mcpFqdn) {
+  Check "MCP health endpoint reachable from private runner" { Invoke-WebRequest -Uri "https://$mcpFqdn/health" -TimeoutSec 15 -UseBasicParsing }
+} else { Fail "INTAKE_MCP_FQDN unavailable" }
 
 Sect "Runner bootstrap resources"
 $acr = az acr list -g $ResourceGroup --subscription $SubscriptionId --query "[?tags.'azd-env-name'=='$EnvName'].name | [0]" -o tsv

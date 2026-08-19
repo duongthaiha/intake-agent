@@ -35,6 +35,12 @@ services:
             INTAKE_SERVICEBUS_BACKEND: azure
             INTAKE_SERVICEBUS_NAMESPACE: ${AZURE_SERVICEBUS_NAMESPACE}
             INTAKE_SERVICEBUS_QUEUE: ${AZURE_SERVICEBUS_QUEUE}
+            INTAKE_MCP_ENDPOINT: ${INTAKE_MCP_ENDPOINT}
+            INTAKE_MCP_AUDIENCE: ${INTAKE_MCP_AUDIENCE}
+            INTAKE_MCP_REQUIRED_SCOPE: ${INTAKE_MCP_REQUIRED_SCOPE}
+            INTAKE_MCP_OAUTH_CONNECTION_NAME: ${MCP_OAUTH_CONNECTION_NAME}
+            INTAKE_MCP_TOOLBOX_NAME: ${MCP_TOOLBOX_NAME}
+            INTAKE_MCP_TOOLBOX_SERVER_LABEL: ${MCP_TOOLBOX_SERVER_LABEL}
         codeConfiguration:
             dependencyResolution: remote_build
             entryPoint: hosted_main.py
@@ -50,6 +56,15 @@ services:
         protocols:
             - protocol: responses
               version: 2.0.0
+    mcp:
+        project: .
+        host: containerapp
+        resourceName: ${AZURE_MCP_CONTAINER_APP_NAME}
+        language: python
+        docker:
+            path: Dockerfile.mcp
+            context: .
+            remoteBuild: true
     workers:
         resourceName: func-intake-${AZURE_ENV_NAME}
         project: src/intake_workers
@@ -97,4 +112,13 @@ hooks:
         posix:
             shell: sh
             run: scripts/azure/preflight.sh
+            interactive: false
+    postdeploy:
+        windows:
+            shell: pwsh
+            run: scripts/azure/postdeploy-mcp.ps1
+            interactive: false
+        posix:
+            shell: sh
+            run: scripts/azure/postdeploy-mcp.sh
             interactive: false

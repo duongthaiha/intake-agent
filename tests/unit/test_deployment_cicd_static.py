@@ -58,6 +58,7 @@ MAIN_JSON_PATH = REPO_ROOT / "infra" / "main.json"
 MAIN_PARAMETERS_PATH = REPO_ROOT / "infra" / "main.parameters.json"
 BOOTSTRAP_BICEP_PATH = REPO_ROOT / "infra" / "bootstrap-runner.bicep"
 IDENTITY_BICEP_PATH = REPO_ROOT / "infra" / "modules" / "identity.bicep"
+CONTAINER_APPS_BICEP_PATH = REPO_ROOT / "infra" / "modules" / "container-apps.bicep"
 KEYVAULT_BICEP_PATH = REPO_ROOT / "infra" / "modules" / "keyvault.bicep"
 STORAGE_BICEP_PATH = REPO_ROOT / "infra" / "modules" / "storage.bicep"
 RUNNER_JOB_BICEP_PATH = REPO_ROOT / "infra" / "modules" / "runner-job.bicep"
@@ -88,6 +89,57 @@ FORBIDDEN_RUNNER_ROLE_IDS = {
 def _read(path: Path) -> str:
     assert path.exists(), f"Expected {path} to exist"
     return path.read_text(encoding="utf-8")
+
+
+def test_private_mcp_container_app_has_matching_health_probes() -> None:
+    text = _read(CONTAINER_APPS_BICEP_PATH)
+    mcp = text[text.index("resource mcpApp "):]
+
+    assert "external: false" in mcp
+    assert "path: '/health'" in mcp
+    assert "path: '/readiness'" in mcp
+    assert "path: '/ready'" not in mcp
+    assert "minReplicas: 1" in mcp
+    assert "maxReplicas: 5" in mcp
+
+
+def test_mcp_identity_is_separate_from_hosted_agent_data_plane() -> None:
+    identity = _read(IDENTITY_BICEP_PATH)
+    main = _read(MAIN_BICEP_PATH)
+    cosmos = _read(REPO_ROOT / "infra" / "modules" / "cosmos.bicep")
+    storage = _read(STORAGE_BICEP_PATH)
+    service_bus = _read(REPO_ROOT / "infra" / "modules" / "servicebus.bicep")
+
+    assert "resource mcpIdentity " in identity
+    assert "mcpIdentityPrincipalId: identity.outputs.mcpIdentityPrincipalId" in main
+    assert "agentIdentityPrincipalId" not in cosmos
+    assert "agentIdentityPrincipalId" not in storage
+    assert "agentIdentityPrincipalId" not in service_bus
+
+
+def test_mcp_v2_audience_and_toolbox_namespace_are_wired_consistently() -> None:
+    main = _read(MAIN_BICEP_PATH)
+    parameters = _read(MAIN_PARAMETERS_PATH)
+    azure_yaml = _read(AZURE_YAML_PATH)
+    bootstrap = _read(REPO_ROOT / "scripts" / "azure" / "bootstrap-mcp-entra.ps1")
+
+    assert "mcpAudience: mcpServerAppClientId" in main
+    assert "output INTAKE_MCP_AUDIENCE string = mcpServerAppClientId" in main
+    assert "api://${mcpServerAppClientId}" not in main
+    assert '"mcpToolboxServerLabel"' in parameters
+    assert "INTAKE_MCP_TOOLBOX_SERVER_LABEL: ${MCP_TOOLBOX_SERVER_LABEL}" in azure_yaml
+    assert 'azd env set MCP_TOOLBOX_SERVER_LABEL "intake_requester_tools"' in bootstrap
+
+
+def test_mcp_rbac_cutover_requires_explicit_delegated_user_approval() -> None:
+    powershell = _read(REPO_ROOT / "scripts" / "azure" / "postdeploy-mcp.ps1")
+    bash = _read(REPO_ROOT / "scripts" / "azure" / "postdeploy-mcp.sh")
+
+    for script in (powershell, bash):
+        gate = script.index("MCP_DATA_PLANE_CUTOVER_APPROVED")
+        first_delete = script.index("role assignment delete")
+        assert gate < first_delete
+        assert "delegated-user Toolbox verification" in script
 
 
 @pytest.fixture(scope="module")

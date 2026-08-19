@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -46,6 +47,30 @@ class IntakeSettings(BaseSettings):
     environment: str = "local"
     hosted_tenant_id: str = ""
     hosted_agent_identity: str = "intake-agent"
+    toolbox_endpoint: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "TOOLBOX_ENDPOINT",
+            "FOUNDRY_TOOLBOX_ENDPOINT",
+            "INTAKE_TOOLBOX_ENDPOINT",
+            "INTAKE_MCP_TOOLBOX_ENDPOINT",
+        ),
+    )
+    mcp_toolbox_name: str = ""
+    mcp_toolbox_server_label: str = "intake_requester_tools"
+    toolbox_timeout_seconds: float = Field(default=120.0, gt=0.0, le=300.0)
+
+    # Private requester MCP service
+    mcp_tenant_id: str = ""
+    mcp_audience: str = ""
+    mcp_required_scope: str = "Intake.Tools.ReadWrite"
+    mcp_issuer: str = ""
+    mcp_resource_url: str = ""
+    mcp_host: str = "0.0.0.0"
+    mcp_port: int = Field(default=8000, ge=1, le=65535)
+    mcp_operation_timeout_seconds: float = Field(default=30.0, gt=0.0, le=120.0)
+    mcp_jwks_timeout_seconds: float = Field(default=5.0, gt=0.0, le=30.0)
+    mcp_local_dev_token: str = "local-dev-token"
 
     # Local-dev role configuration.
     # SECURITY: These settings are ONLY consulted when environment == "local".
@@ -76,7 +101,11 @@ def validate_hosted_settings(settings: IntakeSettings) -> None:
     environment = settings.environment.strip().lower()
     deployed = environment != "local"
 
-    if deployed and not settings.hosted_tenant_id.strip():
+    if (
+        deployed
+        and not settings.hosted_tenant_id.strip()
+        and not settings.mcp_tenant_id.strip()
+    ):
         errors.append("INTAKE_HOSTED_TENANT_ID is required outside local development")
     if deployed and not settings.azure_client_id.strip():
         errors.append("AZURE_CLIENT_ID is required for the user-assigned managed identity")
@@ -126,6 +155,58 @@ def validate_hosted_settings(settings: IntakeSettings) -> None:
             "INTAKE_SERVICEBUS_NAMESPACE is required when "
             "INTAKE_SERVICEBUS_BACKEND=azure"
         )
+
+    if errors:
+        raise IntakeConfigurationError("; ".join(errors))
+
+
+def validate_toolbox_settings(settings: IntakeSettings) -> None:
+    """Require a managed-identity-authenticated Toolbox in deployed hosts."""
+    if settings.environment.strip().lower() == "local":
+        return
+
+    errors: list[str] = []
+    endpoint = settings.toolbox_endpoint.strip()
+    if not endpoint and not settings.mcp_toolbox_name.strip():
+        errors.append(
+            "INTAKE_TOOLBOX_ENDPOINT or INTAKE_MCP_TOOLBOX_NAME is required "
+            "outside local development"
+        )
+    elif endpoint and urlsplit(endpoint).scheme.lower() != "https":
+        errors.append("INTAKE_TOOLBOX_ENDPOINT must use HTTPS")
+    if not settings.mcp_toolbox_server_label.strip():
+        errors.append("INTAKE_MCP_TOOLBOX_SERVER_LABEL is required")
+    if not settings.azure_client_id.strip():
+        errors.append("AZURE_CLIENT_ID is required for the hosted managed identity")
+    if errors:
+        raise IntakeConfigurationError("; ".join(errors))
+
+
+def validate_mcp_settings(settings: IntakeSettings) -> None:
+    """Validate the fail-closed MCP authentication and persistence settings."""
+    validate_hosted_settings(settings)
+    environment = settings.environment.strip().lower()
+    errors: list[str] = []
+
+    if environment == "local":
+        if not settings.mcp_local_dev_token:
+            errors.append("INTAKE_MCP_LOCAL_DEV_TOKEN must not be empty in local mode")
+    else:
+        tenant_id = settings.mcp_tenant_id.strip()
+        if not tenant_id:
+            errors.append("INTAKE_MCP_TENANT_ID is required outside local development")
+        if not settings.mcp_audience.strip():
+            errors.append("INTAKE_MCP_AUDIENCE is required outside local development")
+        if not settings.mcp_required_scope.strip():
+            errors.append("INTAKE_MCP_REQUIRED_SCOPE is required outside local development")
+        issuer = settings.mcp_issuer.strip()
+        expected_issuer = (
+            f"https://login.microsoftonline.com/{tenant_id}/v2.0" if tenant_id else ""
+        )
+        if issuer and issuer.rstrip("/") != expected_issuer:
+            errors.append("INTAKE_MCP_ISSUER must be the configured tenant v2 issuer")
+        if settings.mcp_resource_url and urlsplit(settings.mcp_resource_url).scheme != "https":
+            errors.append("INTAKE_MCP_RESOURCE_URL must use HTTPS")
 
     if errors:
         raise IntakeConfigurationError("; ".join(errors))

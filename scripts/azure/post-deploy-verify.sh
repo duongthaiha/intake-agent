@@ -118,10 +118,35 @@ fi
 
 section "Application and identities"
 check "Function App is Running" test "$(az functionapp show -g "$RESOURCE_GROUP" -n "func-intake-${ENV_NAME}" --query state -o tsv)" = Running
-for identity in agent worker eval notify runner; do
+for identity in agent worker eval notify mcp runner; do
   check "Managed identity id-intake-${identity}-${ENV_NAME}" \
     az identity show -g "$RESOURCE_GROUP" -n "id-intake-${identity}-${ENV_NAME}"
 done
+
+MCP_APP="${AZURE_MCP_CONTAINER_APP_NAME:-$(azd_env_value AZURE_MCP_CONTAINER_APP_NAME)}"
+MCP_FQDN="${INTAKE_MCP_FQDN:-$(azd_env_value INTAKE_MCP_FQDN)}"
+if [[ -n "$MCP_APP" ]]; then
+  MCP_JSON="$(az containerapp show -g "$RESOURCE_GROUP" -n "$MCP_APP" -o json 2>/dev/null || true)"
+  if [[ "$(jq -r '.properties.configuration.ingress.external // true' <<<"$MCP_JSON")" == "false" ]]; then
+    pass "MCP Container App ingress is internal-only"
+  else
+    fail "MCP Container App ingress is not internal-only"
+  fi
+  if [[ -n "$(jq -r '.properties.latestReadyRevisionName // empty' <<<"$MCP_JSON")" &&
+        "$(jq -r '.properties.latestReadyRevisionName' <<<"$MCP_JSON")" == "$(jq -r '.properties.latestRevisionName' <<<"$MCP_JSON")" ]]; then
+    pass "MCP latest revision is ready"
+  else
+    fail "MCP latest revision is not ready"
+  fi
+else
+  fail "AZURE_MCP_CONTAINER_APP_NAME unavailable"
+fi
+if [[ -n "$MCP_FQDN" ]]; then
+  check "MCP health endpoint reachable from private runner" \
+    curl --fail --silent --show-error --max-time 15 "https://${MCP_FQDN}/health"
+else
+  fail "INTAKE_MCP_FQDN unavailable"
+fi
 
 section "Runner bootstrap resources"
 ACR_NAME="$(az acr list -g "$RESOURCE_GROUP" --subscription "$SUBSCRIPTION" --query "[?tags.'azd-env-name'=='${ENV_NAME}'].name | [0]" -o tsv 2>/dev/null || true)"

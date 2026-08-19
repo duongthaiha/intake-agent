@@ -41,6 +41,7 @@ No Azure credentials are required for the default test suite or local HTTP API.
 | Browser chat backed by a Foundry model | `intake-devui` | `src/intake_agent/devui.py` |
 | Teams cards, parser, and local auth guards | `PYTHONPATH=src python -m intake_teams.demo --verbose` | `src/intake_teams/demo/` |
 | Deployed Responses-protocol agent | `python hosted_main.py` | `hosted_main.py` -> `src/intake_agent/hosted.py` |
+| Target private requester tool service | Deployed with the application after ADR-015 implementation | `src/intake_mcp/` (planned) |
 | Azure Functions workers | Deployed by `azd deploy` | `src/intake_workers/function_app.py` |
 
 The local API is the fastest way to understand the deterministic behavior. Use
@@ -71,6 +72,7 @@ Foundry behavior around the same application service.
 | Teams production authentication | Scaffold, fail closed | Production JWT verification always returns a configuration error until a JWKS validator is implemented. |
 | Evaluation | Implemented for local scorecards and Foundry smoke configuration | Local scoring and threshold tests exist; deployed release orchestration remains environment-dependent. |
 | Azure infrastructure | Implemented as Bicep and azd configuration | Modules, feature gates, packaging hooks, preflight, and verification scripts are present. Deployment still depends on subscription, networking, provider, and RBAC readiness. |
+| Private requester MCP and Foundry Toolbox | Runtime and Azure deployment implemented; tenant bootstrap required | The streamable-HTTP service, strict Entra validation, Toolbox client, internal Container App, separate data identity, and guarded RBAC cutover are implemented. An administrator must still create the secure Foundry OAuth connection/Toolbox, complete delegated-user consent verification, and approve cutover. |
 
 ## 3. System mental model
 
@@ -84,11 +86,14 @@ flowchart TD
     User --> HTTP[Local FastAPI]
     User --> DevUI[Local Agent Framework DevUI]
 
-    Foundry --> Hosted[HostedRuntime and Foundry tools]
+    Foundry --> Hosted[Hosted Agent]
     DevUI --> Hosted
     HTTP --> Local[LocalAdapter]
 
-    Hosted --> App[IntakeApplication]
+    Hosted -. target .-> Toolbox[Versioned Foundry Toolbox]
+    Toolbox -. custom OAuth .-> MCP[Private requester MCP]
+    MCP -. target .-> App[IntakeApplication]
+    Hosted --> App
     Local --> App
 
     App --> Handlers[Command handlers]
@@ -111,6 +116,12 @@ The model never receives a Cosmos client, managed identity, repository object,
 role assignment, or arbitrary request ID. The model can invoke only the tools
 created in `create_intake_tools()`. Those tools call `HostedRuntime`, which
 injects the platform-derived actor and then calls `IntakeApplication`.
+
+That final sentence describes the current in-process implementation. ADR-015
+replaces it for deployed requester tools: the Hosted Agent consumes a versioned
+Foundry Toolbox, the private MCP validates a same-tenant delegated token, and
+the MCP workload identity calls the application/persistence layer. The local
+adapter remains only for local tests and DevUI.
 
 ### 3.2 Package dependency direction
 
@@ -489,7 +500,8 @@ conversation to an arbitrary request.
 
 ### 5.8 Foundry Hosted Agent conversation
 
-**Status:** Implemented for requester operations.
+**Status:** Current in-process requester implementation; approved for extraction
+to private MCP but not yet cut over.
 
 **Components**
 
@@ -538,6 +550,27 @@ confirmation before submission.
 4. `DefaultAzureCredential` authenticates the Foundry client and Azure
    repositories.
 5. The host exposes `/responses`, `/health`, and SDK readiness behavior.
+
+**ADR-015 target workflow**
+
+1. The Hosted Agent authenticates to Foundry with its workload identity and
+   consumes a pinned, versioned Toolbox.
+2. Toolbox manages the custom OAuth connection, user consent, token refresh,
+   and private MCP selection.
+3. The MCP boundary validates signature, exact issuer/tenant, MCP audience,
+   lifetime, and `Intake.Tools.ReadWrite`.
+4. Only validated `tid` and `oid`, plus trusted bounded protocol metadata,
+   produce `ActorContext`; caller/model identity, roles, request IDs,
+   correlation IDs, idempotency IDs, and authorization decisions are rejected.
+5. A separate MCP managed identity accesses Cosmos, Blob, and Service Bus. The
+   user token is not forwarded.
+6. Toolbox/OAuth/MCP failure is explicit in deployed environments; there is no
+   in-process or local fallback.
+
+The four names and behavioral contract remain
+`get_intake_context`, `update_intake_field`,
+`submit_intake_for_review`, and `list_my_intake_requests`. Reviewer operations
+remain unavailable.
 
 ### 5.9 Local HTTP API and DevUI
 
@@ -821,11 +854,15 @@ environment-dependent.
 
 | Component | Responsibility |
 |---|---|
-| `infra/main.bicep` | Subscription-scope orchestration and azd outputs. |
+| `infra/main.bicep` | Resource-group-scoped orchestration and azd outputs. |
 | `infra/modules/` | Monitoring, network, identities, Key Vault, Storage, Cosmos, Service Bus, Search, Functions, Container Apps, Foundry, and Bot modules. |
 | `azure.yaml` | Foundry agent, Functions, Bicep, environment, and packaging contract. |
 | `scripts/azure/preflight.*` | Checks subscription, providers, RBAC signals, quota, and region readiness. |
 | `scripts/azure/post-deploy-verify.*` | Checks resources, data shape, queues, identities, Functions, and network. |
+
+ADR-015 adds a target private MCP Container App to the **existing** Container
+Apps managed environment and a dedicated MCP user-assigned identity. It does
+not imply these resources or verification steps exist yet.
 
 **Feature gates**
 
@@ -843,8 +880,8 @@ environment-dependent.
 3. Run the preflight hook.
 4. Review `azd provision --preview --no-prompt`.
 5. Run `azd provision --no-prompt`.
-6. `infra/main.bicep` creates the resource group and modules, then exports
-   service configuration.
+6. `infra/main.bicep` deploys modules into the existing resource group and
+   exports service configuration.
 7. Run `azd deploy --no-prompt`.
 8. The Hosted Agent remote build installs the root `requirements.txt` and
    starts `hosted_main.py` on Python 3.13.
@@ -855,6 +892,13 @@ environment-dependent.
 
 All runtime service authentication uses managed identity. Do not add account
 keys, connection strings, client secrets, or Service Bus SAS policies.
+
+The custom OAuth credential is the exception only in the sense that Foundry
+requires a client credential for the project connection: it belongs solely in
+an approved secret store/Foundry connection, never application configuration,
+source, logs, Bicep output, or azd output. Entra app registrations, scopes,
+redirect URIs, preauthorization, and consent are tenant-scoped and must be set
+up separately from resource-group-scoped Bicep.
 
 ## 6. Configuration model
 
@@ -884,6 +928,11 @@ Any non-local Hosted Agent requires:
 If a deployed runtime selects an in-memory backend or omits required Azure
 values, startup raises `IntakeConfigurationError` instead of silently losing
 state.
+
+After MCP cutover, non-local startup additionally requires an overlapping
+Toolbox/MCP contract version, private MCP endpoint, exact tenant/issuer/audience
+and delegated-scope configuration, and the MCP managed identity. Missing values
+fail closed. Production cannot select the local/in-process adapter.
 
 See `docs/contracts/infrastructure-config.md` for the complete environment,
 container, partition-key, package, and RBAC contract.
@@ -941,15 +990,19 @@ arbitrary actor fields.
 7. Record the outcome through a domain command rather than patching Cosmos.
 8. Add unit, contract, component, and deployed smoke tests.
 
-### 7.6 Add a Hosted Agent tool
+### 7.6 Add or change a requester tool
 
-1. Add or reuse an `IntakeApplication` method.
-2. Keep identity and authorization data out of the tool signature.
-3. Use bounded Pydantic/`Annotated` input constraints.
-4. Update `AGENT_INSTRUCTIONS` with the exact precondition and confirmation
-   behavior.
-5. Update `test_foundry_hosted_contract.py` so the public tool surface is
-   intentional.
+1. Treat ADR-015's four-tool surface as closed; obtain architecture/security
+   approval before adding a fifth tool.
+2. Add or reuse a transport-neutral `IntakeApplication` port.
+3. Keep identity, authorization, request, correlation, and idempotency context
+   out of model-controlled signatures.
+4. Use closed, bounded schemas and preserve structured error categories.
+5. Additive optional changes increment the minor contract; removal, rename,
+   semantic change, or newly invalid input requires a new major surface.
+6. Update Hosted Agent, local adapter, MCP discovery/invocation, JWT,
+   idempotency, compatibility, and end-to-end contract coverage together.
+7. Maintain overlap between agent and MCP supported ranges during rollout.
 
 ### 7.7 Change Teams behavior
 
@@ -979,6 +1032,11 @@ arbitrary actor fields.
 | A required gap is absent on a brand-new request | Missing gaps are currently materialized after the first update, not at creation. |
 | Hosted Agent refuses startup | Check Foundry endpoint/model, tenant ID, managed identity client ID, and all durable backend settings. |
 | Hosted Agent cannot find user/chat scope | The deployed Responses request did not provide required isolation keys. Do not fall back to shared identity. |
+| Toolbox returns `consent_required` | Confirm same tenant, OAuth connection/scope, and tenant consent policy; complete the approved user flow, never an app-only fallback. |
+| MCP returns invalid token | Check signature, exact issuer/tenant, audience, lifetime, and delegated scope; do not weaken validation. |
+| Toolbox cannot discover MCP tools | Check selected versions, readiness, private DNS/TLS, internal ingress, and Foundry private reachability; do not enable public ingress. |
+| MCP data access fails | Check that `AZURE_CLIENT_ID` selects the separate MCP UAMI and verify its narrow data-plane roles; never forward the user token. |
+| Agent and MCP contract ranges do not overlap | Stop rollout and select compatible releases; do not reinterpret schemas in prompts. |
 | Local review returns 403 | Confirm local environment and exact membership in `INTAKE_LOCAL_DEV_REVIEWER_IDS`. |
 | Teams production request returns 503 | Expected until JWKS validation is implemented; do not bypass the boundary. |
 | Outbox records remain pending | Check Functions timer execution, Cosmos access, Service Bus sender role, namespace, queue, and transient errors. |
@@ -999,6 +1057,8 @@ arbitrary actor fields.
 | `docs/adr/ADR-012-package-module-boundaries.md` | Package dependency decisions |
 | `docs/adr/ADR-013-domain-entities-and-vertical-flow.md` | Domain model and original vertical-slice decision |
 | `docs/adr/ADR-014-teams-integration-boundary.md` | Why Teams is an isolated adapter boundary |
+| `docs/adr/ADR-015-private-requester-mcp-boundary.md` | Requester MCP, identity, versioning, deployment, and ownership decision |
+| `docs/operations/requester-mcp.md` | MCP consent, deployment gates, operations, troubleshooting, and rollback |
 | `docs/contracts/command-event-schemas.md` | Command, error, event, and correlation contracts |
 | `docs/contracts/repository-interfaces.md` | Persistence ports and implementation mapping |
 | `docs/contracts/infrastructure-config.md` | Runtime environment, data shape, packaging, and RBAC |

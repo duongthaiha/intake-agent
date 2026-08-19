@@ -6,6 +6,13 @@
 > Azure-backed variables/OIDC roles, and the runner bootstrap are still pending.
 > Until an operator completes and validates those items, the deploy workflow is
 > not operational. `test` and `prod` remain unconfigured and out of scope.
+>
+> ADR-015's private requester MCP Container App, separate workload identity,
+> runtime, and guarded deployment automation are implemented. Tenant-scoped
+> Entra objects and the secure Foundry OAuth connection/Toolbox remain a
+> separately governed bootstrap. Follow
+> [the requester MCP runbook](requester-mcp.md); production cutover is blocked
+> until its delegated-user gates have evidence.
 
 ## Architecture and trust boundaries
 
@@ -30,6 +37,11 @@ The two identities have separate responsibilities:
 |---|---|---|
 | Azure deployer | GitHub OIDC workload identity federation | Resource-group-scoped deployment/RBAC permissions |
 | Runner user-assigned managed identity | Azure managed identity | `AcrPull` on the runner ACR only |
+
+The target MCP runtime adds another identity with a separate purpose: Azure
+requester data-plane access. It is not the runner or deployer identity. The
+delegated user token authorizes the MCP operation and must not be forwarded to
+Cosmos, Blob, or Service Bus.
 
 The runner managed identity is not a deployment identity and has no application
 data-plane or Key Vault access. The workflow obtains Azure access only through
@@ -56,6 +68,13 @@ Azure CLI, Azure Developer CLI, Git, and access to the target subscription.
 The deployment workflow uses the SHA-pinned `Azure/setup-azd` v2 action and
 installs the `microsoft.foundry` azd extension explicitly. `azure.yaml` also
 declares the required Foundry extension versions.
+
+The Entra resource application, OAuth client, delegated scope, redirect URI,
+preauthorization, tenant/admin consent, Foundry project connection, and Toolbox
+are tenant/Foundry-scoped setup. Resource-group-scoped Bicep cannot own them.
+Any later automation must be separately governed, idempotent, non-interactive,
+and redact credentials. Until it exists, operators must not describe
+`azd provision` or this workflow as end-to-end MCP/consent provisioning.
 
 ### Required GitHub variables
 
@@ -209,6 +228,13 @@ Until all checks pass, external setup remains **pending**.
    step. A failed check fails the deployment.
 9. The ephemeral runner exits and deregisters; ACA returns to zero executions.
 
+After ADR-015 implementation, the deployment gate must additionally pin and
+deploy the MCP image, verify internal-only ingress and Foundry reachability,
+verify Toolbox discovery and all four operations, reject invalid token cases,
+prove contract-range overlap and idempotency, and verify Hosted Agent/MCP RBAC
+separation. These are required future workflow capabilities, not a description
+of the workflow currently present.
+
 Manual `workflow_dispatch` must itself run from `main`. With no `ref` input it
 deploys the current tip. For recovery, an optional full 40-character commit SHA
 is accepted only when it is an ancestor of `origin/main` **and** GitHub reports
@@ -251,6 +277,10 @@ deployment history.
 | ACR remains public after bootstrap | Disable public access immediately and investigate the bootstrap trap/run log before any deploy |
 | Runner remains registered | Manually deregister it, investigate cleanup, and do not proceed while a standing runner remains |
 | Verification fails | Treat the deploy as failed; inspect verification output and runtime telemetry |
+| Toolbox reports consent required | Confirm same-tenant Entra/Foundry setup and approved consent policy; complete the user flow, never use app-only fallback |
+| Toolbox cannot reach/discover MCP | Check selected versions, readiness, private DNS/TLS, internal ingress, and Foundry private network; never enable public ingress |
+| MCP token validation fails | Check signature, exact issuer/tenant, audience, lifetime, and delegated scope; do not weaken validation |
+| MCP data access fails | Check the dedicated MCP UAMI and narrow Cosmos/Blob/Service Bus roles; do not forward the user token |
 
 ## Forward-only recovery
 
@@ -266,6 +296,12 @@ through the current deployment machinery. Do not use `azd down` or
 resource-group teardown for routine recovery; `dev` contains persistent data.
 Destructive reset remains a separate, explicitly human-confirmed operation
 documented in the historical deployment plan.
+
+For the requester boundary, roll back the Hosted Agent, Toolbox selection, MCP
+image revision, and compatible contract as one reviewed release. There is no
+automatic production fallback to embedded tools, the local API, or DevUI. If
+the private path cannot be restored, stop requester mutations. See
+[the MCP rollback procedure](requester-mcp.md#rollback).
 
 ## Out of scope
 

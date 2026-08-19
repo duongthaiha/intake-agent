@@ -65,12 +65,14 @@ class IntakeApplication:
         expected_revision: int,
         updates: list[dict[str, Any]],
         actor: ActorContext,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         envelope = self._envelope(
             command_type="propose_field_updates",
             request_id=request_id,
             expected_revision=expected_revision,
             actor=actor,
+            idempotency_key=idempotency_key,
         )
         data = ProposeFieldUpdatesData(
             updates=[FieldUpdateItem(**update) for update in updates]
@@ -82,12 +84,14 @@ class IntakeApplication:
         request_id: str,
         expected_revision: int,
         actor: ActorContext,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         envelope = self._envelope(
             command_type="submit_for_review",
             request_id=request_id,
             expected_revision=expected_revision,
             actor=actor,
+            idempotency_key=idempotency_key,
         )
         return await self._submit.handle(envelope, actor)
 
@@ -118,6 +122,7 @@ class IntakeApplication:
         request_id: str,
         expected_revision: int,
         actor: ActorContext,
+        idempotency_key: str | None = None,
     ) -> CommandEnvelope:
         return CommandEnvelope(
             command_type=command_type,
@@ -130,5 +135,5 @@ class IntakeApplication:
                 actor_type="user",
                 agent_identity=actor.agent_identity,
             ),
-            idempotency_key=str(uuid4()),
+            idempotency_key=idempotency_key or str(uuid4()),
         )
