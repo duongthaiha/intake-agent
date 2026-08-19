@@ -1,1 +1,0 @@
-"""Packaged intake template schemas."""
