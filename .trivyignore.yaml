@@ -1,0 +1,9 @@
+misconfigurations:
+  - id: AZU-0013
+    paths:
+      - modules/keyvault.json
+    statement: >-
+      Trivy 0.70 false positive: the compiled ARM module sets
+      publicNetworkAccess to Disabled and networkAcls.defaultAction to Deny.
+      Static CI/CD contract tests enforce both values.
+    expired_at: 2027-08-19T00:00:00Z

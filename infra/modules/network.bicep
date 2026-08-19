@@ -113,6 +113,7 @@ var dnsZones = [
   'privatelink.services.ai.azure.com'
   'privatelink.openai.azure.com'
   'privatelink.cognitiveservices.azure.com'
+  'privatelink.azurecr.io'
 ]
 
 resource privateDnsZones 'Microsoft.Network/privateDnsZones@2020-06-01' = [for zone in dnsZones: {
@@ -307,3 +308,4 @@ output keyVaultPrivateDnsZoneId string = privateDnsZones[4].id
 output foundryServicesPrivateDnsZoneId string = privateDnsZones[5].id
 output foundryOpenAiPrivateDnsZoneId string = privateDnsZones[6].id
 output foundryCognitiveServicesPrivateDnsZoneId string = privateDnsZones[7].id
+output acrPrivateDnsZoneId string = privateDnsZones[8].id

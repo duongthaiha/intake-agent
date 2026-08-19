@@ -55,6 +55,9 @@ info "Tenant: $TENANT_ID"
 # ---------------------------------------------------------------------------
 section "2. Resource Provider Registrations"
 
+# Foundry is provisioned unconditionally by infra/main.bicep (the dead
+# deployFoundry toggle is gone), so its providers are hard requirements, not
+# warnings. Only the Bot Service remains genuinely optional.
 declare -A REQUIRED_PROVIDERS=(
   ["Microsoft.Storage"]="required"
   ["Microsoft.DocumentDB"]="required"
@@ -67,8 +70,8 @@ declare -A REQUIRED_PROVIDERS=(
   ["Microsoft.ManagedIdentity"]="required"
   ["Microsoft.OperationalInsights"]="required"
   ["microsoft.insights"]="required"
-  ["Microsoft.MachineLearningServices"]="optional-foundry"
-  ["Microsoft.CognitiveServices"]="optional-foundry"
+  ["Microsoft.MachineLearningServices"]="required-foundry"
+  ["Microsoft.CognitiveServices"]="required-foundry"
   ["Microsoft.BotService"]="optional-bot"
 )
 
@@ -81,40 +84,56 @@ for provider in "${!REQUIRED_PROVIDERS[@]}"; do
     info "$provider: Registered"
   elif [[ "$tier" == "required" ]]; then
     fail "$provider: $state — run: az provider register --namespace $provider --subscription $SUBSCRIPTION"
-  elif [[ "$tier" == "optional-foundry" ]]; then
-    warn "$provider: $state — required when deployFoundry=true. Register before enabling Foundry gate."
+  elif [[ "$tier" == "required-foundry" ]]; then
+    fail "$provider: $state — Foundry is deployed unconditionally; run: az provider register --namespace $provider --subscription $SUBSCRIPTION"
   elif [[ "$tier" == "optional-bot" ]]; then
     warn "$provider: $state — required when deployBotService=true. Register before enabling Bot Service gate."
   fi
 done
 
 # ---------------------------------------------------------------------------
-# RBAC — deploying identity must have Contributor + User Access Administrator
+# RBAC — supplied federated service principal needs resource-group access
 # ---------------------------------------------------------------------------
 section "3. Deployer RBAC"
 
-PRINCIPAL_ID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo "")
-if [[ -z "$PRINCIPAL_ID" ]]; then
-  warn "Could not determine signed-in user OID (may be SPN — validate manually)"
+# The deployment needs two distinct capabilities at the target resource group:
+#   1. Contributor — to create/update the resources themselves.
+#   2. Authority to WRITE role assignments — main.bicep and the postprovision
+#      RBAC reconciliation both create Microsoft.Authorization/roleAssignments.
+#      Contributor explicitly cannot do this, so a deployment with Contributor
+#      alone fails partway through, after resources exist. Any one of Role
+#      Based Access Control Administrator, User Access Administrator, or Owner
+#      satisfies it.
+: "${AZURE_PRINCIPAL_ID:?AZURE_PRINCIPAL_ID is required (federated service principal object ID)}"
+RG_NAME="${AZURE_RESOURCE_GROUP:-rg-intake-${ENV_NAME}}"
+RG_SCOPE="/subscriptions/${SUBSCRIPTION}/resourceGroups/${RG_NAME}"
+info "Deploying service principal: $AZURE_PRINCIPAL_ID"
+
+# Includes inherited subscription/management-group assignments, which are just
+# as effective at the resource-group scope.
+ASSIGNED_ROLES=$(az role assignment list --assignee-object-id "$AZURE_PRINCIPAL_ID" \
+  --scope "$RG_SCOPE" --include-inherited \
+  --query "[].roleDefinitionName" -o tsv 2>/dev/null || echo "")
+
+has_role() {
+  printf '%s\n' "$ASSIGNED_ROLES" | grep -Fxq "$1"
+}
+
+if has_role "Contributor" || has_role "Owner"; then
+  info "Contributor-equivalent role found at $RG_NAME"
 else
-  info "Deploying principal: $PRINCIPAL_ID"
+  fail "Contributor role not found at $RG_NAME for supplied service principal"
+fi
 
-  # Check Owner at management group level (covers subscription + RG creation)
-  HAS_OWNER=$(az role assignment list --assignee "$PRINCIPAL_ID" \
-    --subscription "$SUBSCRIPTION" --all \
-    --query "[?roleDefinitionName=='Owner'].roleDefinitionName | [0]" -o tsv 2>/dev/null || echo "")
-
-  HAS_CONTRIBUTOR=$(az role assignment list --assignee "$PRINCIPAL_ID" \
-    --subscription "$SUBSCRIPTION" \
-    --query "[?roleDefinitionName=='Contributor'].roleDefinitionName | [0]" -o tsv 2>/dev/null || echo "")
-
-  if [[ -n "$HAS_OWNER" ]]; then
-    info "Owner role found (covers Contributor + User Access Administrator)"
-  elif [[ -n "$HAS_CONTRIBUTOR" ]]; then
-    warn "Contributor found but Owner not found — role assignments (RBAC) may fail. Add User Access Administrator."
-  else
-    warn "Neither Owner nor Contributor found at subscription scope — check resource group-level assignments"
-  fi
+ROLE_WRITE_ROLES=("Role Based Access Control Administrator" "User Access Administrator" "Owner")
+ROLE_WRITE_FOUND=""
+for role in "${ROLE_WRITE_ROLES[@]}"; do
+  if has_role "$role"; then ROLE_WRITE_FOUND="$role"; break; fi
+done
+if [[ -n "$ROLE_WRITE_FOUND" ]]; then
+  info "Role-assignment authority found at $RG_NAME: $ROLE_WRITE_FOUND"
+else
+  fail "No role-assignment authority at $RG_NAME — the deployment creates role assignments and needs one of: ${ROLE_WRITE_ROLES[*]}"
 fi
 
 # ---------------------------------------------------------------------------

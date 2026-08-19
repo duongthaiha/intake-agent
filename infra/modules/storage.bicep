@@ -4,7 +4,6 @@ targetScope = 'resourceGroup'
 param location string
 param tags object
 param storageAccountName string
-param deployPrivateEndpoints bool
 param workerIdentityPrincipalId string
 param evalIdentityPrincipalId string
 param functionsMIPrincipalId string
@@ -29,13 +28,9 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
-    publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
-    networkAcls: deployPrivateEndpoints ? {
+    publicNetworkAccess: 'Disabled'
+    networkAcls: {
       defaultAction: 'Deny'
-      bypass: 'AzureServices, Logging, Metrics'
-      virtualNetworkRules: !empty(functionsSubnetId) ? [{ id: functionsSubnetId, action: 'Allow' }] : []
-    } : {
-      defaultAction: 'Allow'
       bypass: 'AzureServices, Logging, Metrics'
       virtualNetworkRules: !empty(functionsSubnetId) ? [{ id: functionsSubnetId, action: 'Allow' }] : []
     }

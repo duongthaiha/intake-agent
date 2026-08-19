@@ -5,7 +5,6 @@ targetScope = 'resourceGroup'
 param location string
 param tags object
 param keyVaultName string
-param deployPrivateEndpoints bool
 param workerIdentityPrincipalId string
 @description('OID of the identity running the deployment — given temporary Secrets Officer access.')
 param deployerPrincipalId string = ''
@@ -28,12 +27,9 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
     enablePurgeProtection: true
-    publicNetworkAccess: deployPrivateEndpoints ? 'Disabled' : 'Enabled'
-    networkAcls: deployPrivateEndpoints ? {
+    publicNetworkAccess: 'Disabled'
+    networkAcls: {
       defaultAction: 'Deny'
-      bypass: 'AzureServices'
-    } : {
-      defaultAction: 'Allow'
       bypass: 'AzureServices'
     }
   }
@@ -64,7 +60,7 @@ resource deployerSecretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsOfficerRoleId)
     principalId: deployerPrincipalId
-    principalType: 'User'
+    principalType: 'ServicePrincipal'
   }
 }
 
