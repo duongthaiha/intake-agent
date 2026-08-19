@@ -78,7 +78,7 @@ if ($serviceBus) {
 
 Sect "Application and identities"
 Check "Function App is Running" { if ((az functionapp show -g $ResourceGroup -n "func-intake-$EnvName" --query state -o tsv) -ne "Running") { throw } }
-foreach ($identity in "agent","worker","eval","notify","runner") { Check "Managed identity id-intake-$identity-$EnvName" { az identity show -g $ResourceGroup -n "id-intake-$identity-$EnvName" } }
+foreach ($identity in "agent","worker","eval","notify","runner","mcp") { Check "Managed identity id-intake-$identity-$EnvName" { az identity show -g $ResourceGroup -n "id-intake-$identity-$EnvName" } }
 
 Sect "Runner bootstrap resources"
 $acr = az acr list -g $ResourceGroup --subscription $SubscriptionId --query "[?tags.'azd-env-name'=='$EnvName'].name | [0]" -o tsv
@@ -107,6 +107,68 @@ if ($ProjectEndpoint) {
 }
 if ($FoundryAccountName) {
   Check "Foundry public access disabled" { if ((az cognitiveservices account show -g $ResourceGroup -n $FoundryAccountName --query properties.publicNetworkAccess -o tsv) -ne "Disabled") { throw } }
+}
+
+Sect "Prompt Agent and private MCP path"
+$mcpApp = Get-AzdEnvValue "INTAKE_MCP_APP_NAME"
+$mcpUrl = Get-AzdEnvValue "INTAKE_MCP_SERVER_URL"
+$mcpConnection = Get-AzdEnvValue "INTAKE_MCP_CONNECTION_NAME"
+$mcpModel = Get-AzdEnvValue "AZURE_AI_MODEL_DEPLOYMENT_NAME"
+
+if ($mcpApp) {
+  Check "Prompt intake MCP Container App exists" { az containerapp show -g $ResourceGroup -n $mcpApp }
+  $mcpEnvironmentId = az containerapp show -g $ResourceGroup -n $mcpApp --query properties.environmentId -o tsv
+  $mcpEnvironmentName = if ($mcpEnvironmentId) { Split-Path $mcpEnvironmentId -Leaf } else { "" }
+  if ($mcpEnvironmentName) {
+    Check "Prompt intake MCP environment is internal" {
+      if ((az containerapp env show -g $ResourceGroup -n $mcpEnvironmentName --query properties.vnetConfiguration.internal -o tsv) -ne "true") { throw }
+    }
+  } else {
+    Fail "Prompt intake MCP environment could not be resolved"
+  }
+} else {
+  Fail "INTAKE_MCP_APP_NAME unavailable from azd outputs"
+}
+
+if ($mcpUrl -match '^https://') {
+  $mcpUri = [uri]$mcpUrl
+  try { $mcpIp = [Net.Dns]::GetHostAddresses($mcpUri.Host)[0].ToString() } catch { $mcpIp = "" }
+  if ($mcpIp -match '^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[0-1])\.') {
+    Pass "Prompt intake MCP private DNS: $($mcpUri.Host) -> $mcpIp"
+  } else {
+    Fail "Prompt intake MCP DNS is not RFC1918: $(if ($mcpIp) { $mcpIp } else { 'no answer' })"
+  }
+  $mcpBase = $mcpUrl -replace '/mcp$', ''
+  Check "Prompt intake MCP health responds" { Invoke-WebRequest -Uri "$mcpBase/health" -TimeoutSec 15 -UseBasicParsing }
+  try {
+    $response = Invoke-WebRequest -Uri $mcpUrl -TimeoutSec 15 -UseBasicParsing
+    $mcpUnauthorizedStatus = $response.StatusCode
+  } catch {
+    $mcpUnauthorizedStatus = $_.Exception.Response.StatusCode.value__
+  }
+  if ($mcpUnauthorizedStatus -eq 401) {
+    Pass "Prompt intake MCP rejects unauthenticated calls"
+  } else {
+    Fail "Prompt intake MCP unauthenticated status: $(if ($mcpUnauthorizedStatus) { $mcpUnauthorizedStatus } else { 'unavailable' })"
+  }
+} else {
+  Fail "INTAKE_MCP_SERVER_URL unavailable from azd outputs"
+}
+
+if ($mcpConnection -and $ProjectEndpoint) {
+  Check "Delegated MCP project connection exists" {
+    azd ai connection show $mcpConnection --project-endpoint $ProjectEndpoint --no-prompt --output json
+  }
+} else {
+  Fail "Prompt intake MCP connection inputs unavailable"
+}
+
+Check "Prompt Agent definition verified" {
+  python scripts/foundry/verify_prompt_agent.py `
+    --project-endpoint $ProjectEndpoint `
+    --model $mcpModel `
+    --server-url $mcpUrl `
+    --connection-name $mcpConnection
 }
 
 Write-Host "`n━━━ Post-Deploy Verification Summary ━━━"; Write-Host "  Passed: $pass"; Write-Host "  Failed: $fail"

@@ -8,6 +8,7 @@ param accountName string
 param deployPrivateEndpoints bool
 param agentIdentityPrincipalId string
 param workerIdentityPrincipalId string
+param mcpIdentityPrincipalId string
 
 // ---------------------------------------------------------------------------
 // Cosmos DB account
@@ -224,6 +225,16 @@ resource workerCosmosRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignme
     roleDefinitionId: cosmosDataContributorRoleDefId
     principalId: workerIdentityPrincipalId
     scope: cosmosAccount.id
+  }
+}
+
+resource mcpCosmosRole 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-05-15' = {
+  parent: cosmosAccount
+  name: guid(cosmosAccount.id, mcpIdentityPrincipalId, '00000000-0000-0000-0000-000000000002')
+  properties: {
+    roleDefinitionId: cosmosDataContributorRoleDefId
+    principalId: mcpIdentityPrincipalId
+    scope: '${cosmosAccount.id}/dbs/${intakeDatabase.name}'
   }
 }
 

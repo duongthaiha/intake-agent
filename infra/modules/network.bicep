@@ -90,6 +90,21 @@ resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
           ]
         }
       }
+      {
+        name: 'snet-intake-mcp'
+        properties: {
+          addressPrefix: '10.0.6.0/23'
+          privateEndpointNetworkPolicies: 'Enabled'
+          delegations: [
+            {
+              name: 'Microsoft.App.environments'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
+        }
+      }
     ]
   }
 }
@@ -99,6 +114,7 @@ var peSubnetId = '${vnet.id}/subnets/snet-private-endpoints'
 var functionsSubnetId = '${vnet.id}/subnets/snet-functions'
 var foundryAgentSubnetId = '${vnet.id}/subnets/snet-foundry-agent'
 var containerAppsSubnetId = '${vnet.id}/subnets/snet-container-apps'
+var mcpSubnetId = '${vnet.id}/subnets/snet-intake-mcp'
 
 // ---------------------------------------------------------------------------
 // Private DNS zones (always created; linked to VNet only when PE enabled)
@@ -300,6 +316,7 @@ output peSubnetId string = peSubnetId
 output functionsSubnetId string = functionsSubnetId
 output foundryAgentSubnetId string = foundryAgentSubnetId
 output containerAppsSubnetId string = containerAppsSubnetId
+output mcpSubnetId string = mcpSubnetId
 output cosmosPrivateDnsZoneId string = privateDnsZones[0].id
 output storageBlobPrivateDnsZoneId string = privateDnsZones[1].id
 output serviceBusPrivateDnsZoneId string = privateDnsZones[2].id

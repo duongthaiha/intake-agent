@@ -78,6 +78,20 @@ def _resolve_actor(actor: ActorContext | None) -> ActorContext:
     return actor if actor is not None else _SYSTEM_ACTOR
 
 
+def _assert_request_access(
+    request: Request,
+    actor: ActorContext,
+    *,
+    allow_reviewer: bool = False,
+) -> None:
+    """Hide requests outside the caller's tenant and authorization scope."""
+    same_tenant = request.tenant_id == actor.tenant_id
+    owns_request = request.requester_id == actor.user_id
+    can_review = allow_reviewer and bool({"reviewer", "admin"} & actor.roles)
+    if not same_tenant or not (owns_request or can_review):
+        raise NotFoundError("Request not found", request_id=request.request_id)
+
+
 def _make_event(
     event_type: str,
     envelope: CommandEnvelope,
@@ -171,6 +185,7 @@ class GetOrCreateRequestHandler:
             )
 
         request, created = await self._request_repo.get_or_create(request_id, factory)
+        _assert_request_access(request, actor)
 
         revision = await self._request_repo.get_current_revision(request_id)
         if revision is None:
@@ -215,6 +230,7 @@ class GetRequestContextHandler:
         request = await self._request_repo.get(request_id)
         if request is None:
             raise NotFoundError("Request not found", request_id=request_id)
+        _assert_request_access(request, actor, allow_reviewer=True)
 
         revision = await self._request_repo.get_current_revision(request_id)
         template = await self._template_repo.get_version(
@@ -296,17 +312,18 @@ class ProposeFieldUpdatesHandler:
         data: ProposeFieldUpdatesData,
     ) -> dict[str, Any]:
         actor = _resolve_actor(actor)
-        # Idempotency check
+        request = await self._request_repo.get(envelope.request_id)
+        if request is None:
+            raise NotFoundError("Request not found", request_id=envelope.request_id)
+        _assert_request_access(request, actor)
+
+        # Authorization precedes replay lookup so stored results cannot leak.
         stored = await self._idempotency_store.check(
             envelope.request_id, envelope.idempotency_key
         )
         if stored is not None:
             logger.info("idempotent replay %s", envelope.command_id)
             return cast(dict[str, Any], stored.result)
-
-        request = await self._request_repo.get(envelope.request_id)
-        if request is None:
-            raise NotFoundError("Request not found", request_id=envelope.request_id)
 
         # Optimistic concurrency
         if request.current_revision != envelope.expected_revision:
@@ -473,15 +490,16 @@ class SubmitForReviewHandler:
         actor: ActorContext | None,
     ) -> dict[str, Any]:
         actor = _resolve_actor(actor)
+        request = await self._request_repo.get(envelope.request_id)
+        if request is None:
+            raise NotFoundError("Request not found", request_id=envelope.request_id)
+        _assert_request_access(request, actor)
+
         stored = await self._idempotency_store.check(
             envelope.request_id, envelope.idempotency_key
         )
         if stored is not None:
             return cast(dict[str, Any], stored.result)
-
-        request = await self._request_repo.get(envelope.request_id)
-        if request is None:
-            raise NotFoundError("Request not found", request_id=envelope.request_id)
 
         if request.current_revision != envelope.expected_revision:
             from intake_domain.errors import ConflictError
@@ -605,21 +623,22 @@ class RecordReviewDecisionHandler:
         data: RecordReviewDecisionData,
     ) -> dict[str, Any]:
         actor = _resolve_actor(actor)
-        stored = await self._idempotency_store.check(
-            envelope.request_id, envelope.idempotency_key
-        )
-        if stored is not None:
-            return cast(dict[str, Any], stored.result)
-
         request = await self._request_repo.get(envelope.request_id)
         if request is None:
             raise NotFoundError("Request not found", request_id=envelope.request_id)
+        _assert_request_access(request, actor, allow_reviewer=True)
 
         if "reviewer" not in actor.roles and "admin" not in actor.roles:
             raise AuthorizationDeniedError(
                 "Only reviewers or admins can record review decisions",
                 user_id=actor.user_id,
             )
+
+        stored = await self._idempotency_store.check(
+            envelope.request_id, envelope.idempotency_key
+        )
+        if stored is not None:
+            return cast(dict[str, Any], stored.result)
 
         try:
             decision = ReviewDecision(data.decision)
@@ -721,4 +740,3 @@ class ListRequestsHandler:
             }
             for r in requests
         ]
-

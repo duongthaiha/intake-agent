@@ -25,6 +25,25 @@ Each runtime reads configuration from environment variables. No secrets are stor
 | `INTAKE_ENVIRONMENT` | Environment name | `dev` / `test` / `prod` |
 | `AZURE_CLIENT_ID` | User-assigned managed identity client ID | (UUID) |
 
+## Prompt Agent MCP service (`intake_mcp`) environment
+
+The Prompt Agent is declarative. These values configure its separate private
+MCP Container App:
+
+| Variable | Description |
+|---|---|
+| `INTAKE_MCP_TENANT_ID` | Single allowed Entra tenant for delegated users |
+| `INTAKE_MCP_AUDIENCE` | MCP API Application ID URI (`api://<client-id>`); the validator also accepts the GUID `aud` emitted by Entra v2 tokens |
+| `INTAKE_MCP_SERVER_URL` | Internal HTTPS Streamable HTTP endpoint ending in `/mcp` |
+| `INTAKE_MCP_REQUIRED_SCOPE` | Delegated scope; currently `access_as_user` |
+| `INTAKE_MCP_ALLOWED_CLIENT_IDS` | Optional comma-separated client allow-list |
+| `AZURE_CLIENT_ID` | `id-intake-mcp-<env>` user-assigned identity client ID |
+
+The service also receives the same Cosmos, Blob, template, and outbox
+configuration used by the Hosted Agent. Its bearer validator requires signature,
+issuer, audience, expiry, scope, `oid`, and `tid`. Tool arguments never carry
+identity, tenant, or roles.
+
 ## Workers (`intake_workers`) environment
 
 | Variable | Description |
@@ -87,6 +106,13 @@ in place; application code must not hard-code either physical queue name.
 | Worker UAMI | Cosmos `/dbs/intake` | Cosmos DB Built-in Data Contributor |
 | Worker dispatcher UAMI | `domain-events-durable` queue | Azure Service Bus Data Sender |
 | Trigger/scale-controller UAMI | Required queues or namespace | Azure Service Bus Data Receiver; retain Data Owner only where FC1 queue-depth scaling requires its management read actions |
+| Prompt MCP UAMI | Cosmos `intake` database | Cosmos DB Built-in Data Contributor |
+| Prompt MCP UAMI | `request-artifacts` container | Storage Blob Data Contributor |
+| Prompt MCP UAMI | Private ACR | AcrPull |
+
+The current MCP request path persists the outbox transactionally in Cosmos and
+does not send directly to Service Bus, so the MCP identity has no Service Bus
+data-plane role.
 
 Blob data access and delegation are deliberately split: Storage Blob Data
 Contributor is scoped to `request-artifacts`, while account-scoped Storage Blob
@@ -158,6 +184,17 @@ services:
       INTAKE_COSMOS_ENDPOINT: ${AZURE_COSMOS_ENDPOINT}
       # ...
 ```
+
+Prompt-agent deployment also consumes:
+
+| Output | Purpose |
+|---|---|
+| `INTAKE_MCP_APP_NAME` | Container App verification target |
+| `INTAKE_MCP_SERVER_URL` | MCP connection target and prompt-agent tool URL |
+| `INTAKE_MCP_AUDIENCE` | `user-entra-token` audience |
+| `INTAKE_MCP_CONNECTION_NAME` | Stable Foundry project connection name |
+| `INTAKE_MCP_IMAGE` | Immutable commit-SHA image reference |
+| `MCP_IDENTITY_CLIENT_ID` | Workload identity used by Azure data adapters |
 
 ## Local development overrides
 

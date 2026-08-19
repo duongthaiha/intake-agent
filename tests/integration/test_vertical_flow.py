@@ -163,9 +163,18 @@ async def test_reviewer_can_approve(adapter):
         {"field_path": "budget.amount", "value": 50000},
         {"field_path": "timeline.target_date", "value": "2027-01-01"},
     ]
-    r = await adapter.propose_updates(request_id=rid, expected_revision=rev, updates=updates)
+    r = await adapter.propose_updates(
+        request_id=rid,
+        expected_revision=rev,
+        updates=updates,
+        user_id="requester-1",
+    )
     new_rev = r.get("revision", rev)
-    sub = await adapter.submit_for_review(request_id=rid, expected_revision=new_rev)
+    sub = await adapter.submit_for_review(
+        request_id=rid,
+        expected_revision=new_rev,
+        user_id="requester-1",
+    )
     # After submit, current_revision increments again
     new_rev2 = sub.get("revision", new_rev)
 

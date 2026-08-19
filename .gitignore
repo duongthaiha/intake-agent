@@ -150,6 +150,7 @@ activemq-data/
 # Environments
 .env
 .envrc
+.azure/.env.lock
 .venv
 env/
 venv/

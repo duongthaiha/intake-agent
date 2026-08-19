@@ -1,0 +1,20 @@
+{
+  "name": "prompt-intake-agent",
+  "kind": "prompt",
+  "description": "Captures and validates structured enterprise intake requests through a private delegated-identity MCP service.",
+  "model_env": "AZURE_AI_MODEL_DEPLOYMENT_NAME",
+  "instructions_file": "instructions.md",
+  "tool": {
+    "type": "mcp",
+    "server_label": "intake",
+    "server_url_env": "INTAKE_MCP_SERVER_URL",
+    "connection_name_env": "INTAKE_MCP_CONNECTION_NAME",
+    "require_approval": "never",
+    "allowed_tools": [
+      "get_intake_context",
+      "update_intake_field",
+      "submit_intake_for_review",
+      "list_my_intake_requests"
+    ]
+  }
+}

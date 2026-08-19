@@ -18,8 +18,9 @@ which invokes
 [`infra/bootstrap-runner.bicep`](../../infra/bootstrap-runner.bicep) out of
 band.
 
-Private-network provisioning, Functions deployment, Foundry Hosted Agent
-deployment, and live verification run on a repository-scoped, ephemeral Azure
+Private-network provisioning, Functions deployment, both Foundry agent
+definitions, the private MCP service, and live verification run on a
+repository-scoped, ephemeral Azure
 Container Apps Jobs runner labeled `aca-intake-dev`. The runner registers with
 `--ephemeral`, accepts one labeled job, and is removed after it finishes. The
 job scales to zero between runs.
@@ -30,6 +31,8 @@ The two identities have separate responsibilities:
 |---|---|---|
 | Azure deployer | GitHub OIDC workload identity federation | Resource-group-scoped deployment/RBAC permissions |
 | Runner user-assigned managed identity | Azure managed identity | `AcrPull` on the runner ACR only |
+| Prompt MCP user-assigned managed identity | Azure managed identity | Cosmos database, artifacts container, and private ACR access only |
+| Prompt end user | Delegated Entra token | Requester operations for that verified tenant/user only |
 
 The runner managed identity is not a deployment identity and has no application
 data-plane or Key Vault access. The workflow obtains Azure access only through
@@ -70,6 +73,7 @@ the organization deliberately centralizes non-secret settings):
 | `AZURE_ENV_NAME` | Must be `dev` |
 | `AZURE_LOCATION` | Azure region for `dev` |
 | `AZURE_PRINCIPAL_ID` | **Object ID** of the deployer's service principal, not its application/client ID |
+| `INTAKE_MCP_APP_CLIENT_ID` | Client ID output by `bootstrap-prompt-intake-auth.*`; not a secret |
 
 `AZURE_CLIENT_ID` and `AZURE_PRINCIPAL_ID` identify different properties of
 the same deployer. The client ID is used for OIDC login; the service-principal
@@ -120,7 +124,17 @@ as an isolated repository setting change.
 4. Add every variable in the table above.
 5. Do not create `test` or `prod` environments for this pipeline.
 
-### 3. Prepare bootstrap inputs
+### 3. Bootstrap delegated prompt-agent authentication
+
+Run `scripts/azure/bootstrap-prompt-intake-auth.sh` or its PowerShell
+counterpart once. The script creates or reuses a single-tenant Entra API
+application, exposes `access_as_user`, creates no client secret, and prints the
+client ID/audience. Store only the client ID as `INTAKE_MCP_APP_CLIENT_ID`.
+
+Each same-tenant user consents on first tool use. CI cannot complete this
+interactive consent and must not substitute a shared workload identity.
+
+### 4. Prepare bootstrap inputs
 
 Authenticate Azure CLI and azd, select `dev`, and provide these values to the
 bootstrap process without committing them:
@@ -136,13 +150,14 @@ bootstrap process without committing them:
 | `GITHUB_REPOSITORY_NAME=<repository>` | Repository name |
 | `GITHUB_RUNNER_PAT=<fine-grained-pat>` | Direct ACA secret input |
 | `RUNNER_SHA256=<reviewed-sha256>` | Optional override; the pinned runner release digest is the default |
+| `INTAKE_MCP_APP_CLIENT_ID=<application-client-id>` | Secretless delegated MCP API registration |
 
 The PAT must be fine-grained, restricted to this repository, and have only the
 repository administration access required to manage self-hosted runners.
 Follow the organization's current GitHub permission policy if GitHub renames or
 splits that permission.
 
-### 4. Run the foundation/bootstrap
+### 5. Run the foundation/bootstrap
 
 From the repository root, run:
 
@@ -152,25 +167,20 @@ bash scripts/azure/bootstrap-runner.sh
 
 The script performs the following ordered operations:
 
-1. Runs `azd provision` for the application foundation. This uses
-   resource-group-scoped `infra/main.bicep` and creates no runner resources.
-2. Invokes `infra/bootstrap-runner.bicep` with `deployRunnerJob=false`. This
-   first bootstrap-template stage creates the runner identity, AAD-only
-   private ACR, private endpoint, and the identity's `AcrPull` assignment.
-3. Temporarily enables ACR public network access so Azure ACR Tasks can build
-   and push the first runner image. ACR admin access remains disabled; the
-   registry remains AAD-authenticated, not anonymous. An exit/signal trap
-   restores public access to `Disabled`, including on build failure. Confirm
-   `publicNetworkAccess` is `Disabled` before proceeding.
-4. Invokes `infra/bootstrap-runner.bicep` again with
-   `deployRunnerJob=true`. This second bootstrap-template stage creates the
-   event-driven ACA Job with the immutable image reference and stores the PAT
-   directly as its secure `github-pat` secret.
+1. Seeds the azd environment and creates the runner identity plus AAD-only ACR
+   without the private endpoint, allowing the first controlled build.
+2. Builds both immutable runner and prompt-MCP images. ACR admin access remains
+   disabled and an exit/signal trap always restores public access to disabled.
+3. Sets the MCP client ID/image in azd and runs resource-group-scoped
+   `infra/main.bicep`, which creates the application network and private MCP
+   runtime but no runner resources.
+4. Reapplies `infra/bootstrap-runner.bicep` with the ACR private endpoint,
+   public access disabled, and `deployRunnerJob=true`.
 
 Thus `bootstrap-runner.bicep` has two stages; it is never called by
 steady-state `azd provision`.
 
-### 5. Validate external setup
+### 6. Validate external setup
 
 Before declaring bootstrap complete:
 
@@ -186,6 +196,9 @@ Before declaring bootstrap complete:
 - Confirm OIDC login succeeds and the runner identity is not used for deploy.
 - Confirm post-deploy verification runs after `azd deploy` and a verification
   failure makes the workflow fail.
+- Complete the manual two-user prompt acceptance: each user consents, each sees
+  only their own requests, and cross-user/cross-tenant request IDs return not
+  found.
 
 Until all checks pass, external setup remains **pending**.
 
@@ -202,17 +215,25 @@ Until all checks pass, external setup remains **pending**.
 5. The workflow checks out the CI-verified SHA, installs setup-azd v2 and
    `microsoft.foundry`, logs in with GitHub OIDC, and fixes the azd resource
    group to `rg-intake-dev`.
-6. A blocking Bicep what-if runs, then `azd provision` applies only
+6. The workflow temporarily opens the AAD-only ACR data-plane path, builds a
+   commit-SHA-tagged MCP image through ACR Tasks, resolves its immutable digest,
+   and restores public access to disabled under an exit/signal trap. It then
+   sets the digest plus Entra client ID in azd.
+7. A blocking Bicep what-if runs, then `azd provision` applies only
    `infra/main.bicep`.
-7. `azd deploy` deploys application code, including the Foundry Hosted Agent.
-8. `scripts/azure/post-deploy-verify.sh` runs **after deploy** as a blocking
+8. `azd deploy` deploys application code, including the Foundry Hosted Agent.
+9. The workflow upserts the `user-entra-token` MCP connection and creates or
+   reuses the immutable `prompt-intake-agent` version.
+10. `scripts/azure/post-deploy-verify.sh` runs **after deploy** as a blocking
    step. A failed check fails the deployment.
-9. The ephemeral runner exits and deregisters; ACA returns to zero executions.
+11. The ephemeral runner exits and deregisters; ACA returns to zero executions.
 
 Manual `workflow_dispatch` must itself run from `main`. With no `ref` input it
 deploys the current tip. For recovery, an optional full 40-character commit SHA
 is accepted only when it is an ancestor of `origin/main` **and** GitHub reports
-a successful push-triggered `CI` run for that exact SHA.
+a successful push-triggered `CI` run for that exact SHA. Recovery commits must
+also contain the prompt-agent deployment contract; commits from before this
+side-by-side migration are rejected before Azure login.
 
 ## PAT rotation
 
@@ -248,6 +269,9 @@ deployment history.
 | OIDC exchange fails | Match the Entra credential to the current environment-scoped subject; if immutable subjects were enabled, update Entra to the emitted immutable subject |
 | No runner takes the job | Check label `aca-intake-dev`, ACA Job scaling, and the direct `github-pat` secret; rotate the PAT if expired |
 | Private endpoint is unreachable | Confirm the step is on the ACA runner; never enable an application service's public access as a workaround |
+| Prompt MCP returns 401 after consent | Confirm the audience is `api://<INTAKE_MCP_APP_CLIENT_ID>`, scope is `access_as_user`, and the token tenant matches the Foundry tenant |
+| Prompt MCP is unreachable | Confirm the internal Container Apps default-domain private DNS wildcard resolves from the Foundry delegated subnet |
+| Prompt agent lists no Hosted Agent requests | Expected: the surfaces use separate verified identity namespaces and do not automatically link requests |
 | ACR remains public after bootstrap | Disable public access immediately and investigate the bootstrap trap/run log before any deploy |
 | Runner remains registered | Manually deregister it, investigate cleanup, and do not proceed while a standing runner remains |
 | Verification fails | Treat the deploy as failed; inspect verification output and runtime telemetry |
@@ -266,6 +290,11 @@ through the current deployment machinery. Do not use `azd down` or
 resource-group teardown for routine recovery; `dev` contains persistent data.
 Destructive reset remains a separate, explicitly human-confirmed operation
 documented in the historical deployment plan.
+
+The prompt path can be rolled back independently by restoring a prior MCP image
+and prompt-agent version or deleting its project connection. Do not remove the
+shared request-ownership checks; they are a defense-in-depth security fix for
+both surfaces.
 
 ## Out of scope
 

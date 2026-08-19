@@ -7,6 +7,7 @@ param storageAccountName string
 param workerIdentityPrincipalId string
 param evalIdentityPrincipalId string
 param functionsMIPrincipalId string
+param mcpIdentityPrincipalId string
 @description('VNet subnet ID for Functions service endpoint (allows Flex Consumption Legion to access storage when publicNetworkAccess=Disabled).')
 param functionsSubnetId string = ''
 
@@ -124,6 +125,16 @@ resource functionsBlobContributor 'Microsoft.Authorization/roleAssignments@2022-
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobDataContributorRoleId)
     principalId: functionsMIPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource mcpArtifactContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(artifactsContainer.id, mcpIdentityPrincipalId, blobDataContributorRoleId)
+  scope: artifactsContainer
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', blobDataContributorRoleId)
+    principalId: mcpIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
 }

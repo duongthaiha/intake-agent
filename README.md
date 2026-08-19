@@ -4,9 +4,10 @@ Intake Agent captures an enterprise request through conversation, validates the
 required information, persists progress, and prepares the request for human
 review and downstream automation.
 
-The solution combines a Microsoft Foundry Hosted Agent with deterministic
-Python domain logic, durable Azure storage, event-driven Azure Functions, and
-Microsoft Teams integration assets.
+The solution keeps a Microsoft Foundry Hosted Agent as the production baseline
+and adds a side-by-side Foundry Prompt Agent backed by a private MCP service.
+Both use deterministic Python domain logic, durable Azure storage, event-driven
+Azure Functions, and Microsoft Teams integration assets.
 
 ## Choose your path
 
@@ -40,6 +41,18 @@ Validation, lifecycle transitions, authorization boundaries, concurrency, and
 idempotency live in Python code rather than in the model prompt.
 
 ## Use the deployed solution
+
+### Agent surfaces
+
+| Agent | Kind | State and identity |
+|---|---|---|
+| `intake-agent` | Hosted | Uses Foundry platform isolation and in-process deterministic tools. |
+| `prompt-intake-agent` | Prompt | Uses the same model and domain rules through a private MCP endpoint with delegated Entra user identity. |
+
+The surfaces deliberately use separate user identity namespaces. A request
+created through one agent is not automatically listed or resumed through the
+other. This avoids unsafe linking between Foundry's opaque Hosted Agent user key
+and an Entra object ID.
 
 ### Access requirement
 
@@ -136,7 +149,8 @@ authoritative source if the environment has since changed.
 | Foundry account | `ais-intake-2k2osaev` |
 | Foundry project | `aiproj-intake-dev` |
 | Model deployment | `gpt-5-nano` |
-| Hosted Agent | `intake-agent`, active version `8` |
+| Hosted Agent | `intake-agent`, active version `9` |
+| Prompt Agent | `prompt-intake-agent`; deployed by the next approved pipeline run |
 | Function App | `func-intake-dev` |
 | Durable stores | Cosmos DB, Blob Storage, Service Bus |
 | Network posture | Private endpoints; public access disabled |
@@ -361,6 +375,9 @@ quality and Foundry evaluation configuration.
   roles
 - Access to the target private network for Hosted Agent code deployment and
   live verification
+- The secretless Entra application created by
+  `scripts/azure/bootstrap-prompt-intake-auth.*`; set its client ID as
+  `INTAKE_MCP_APP_CLIENT_ID`
 
 Check the installed Foundry tooling:
 
@@ -483,11 +500,15 @@ pipeline for a deployment.
 
 ```text
 User / approved channel
+          +--> Microsoft Foundry Hosted Agent (Responses protocol)
           |
-          v
-Microsoft Foundry Hosted Agent (Responses protocol)
-          |
-          v
+          +--> Microsoft Foundry Prompt Agent
+                       |
+                       v
+              Private delegated-identity MCP service
+          \_____________/
+                 |
+                 v
 Deterministic intake domain and application services
           |
           +--> Cosmos DB: request state, templates, idempotency, atomic outbox
@@ -529,6 +550,10 @@ Read more:
   as `inmemory`.
 - The Hosted Agent trusts Foundry isolation context, not model-supplied
   identity or authorization fields.
+- The Prompt Agent MCP service validates a same-tenant delegated Entra token and
+  derives requester identity only from verified `oid` and `tid` claims.
+- Every caller-selected request ID is re-authorized against tenant and requester
+  ownership before reads, mutations, reviews, or idempotent replay.
 - Every mutation uses optimistic concurrency and idempotency controls.
 - Teams production authentication fails closed until the real tenant token
   validation and publishing configuration is complete.
@@ -553,6 +578,15 @@ Check:
 - The identity has Cosmos DB Built-in Data Contributor, Storage Blob Data
   Contributor/Delegator as required, and Service Bus Sender permissions.
 - `INTAKE_HOSTED_TENANT_ID` is set.
+
+### Prompt Agent cannot call the MCP tools
+
+Check that the MCP Container App resolves to an RFC1918 address from the Foundry
+delegated subnet, `INTAKE_MCP_SERVER_URL` ends in `/mcp`, the project connection
+uses `user-entra-token`, and its audience matches `api://<MCP app client ID>`.
+The first call for each same-tenant user can return a consent link. Complete the
+consent flow and retry; do not replace delegated identity with a shared key or
+managed identity.
 
 ### Cosmos writes fail or transactional batches are rejected
 

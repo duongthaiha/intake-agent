@@ -41,6 +41,7 @@ No Azure credentials are required for the default test suite or local HTTP API.
 | Browser chat backed by a Foundry model | `intake-devui` | `src/intake_agent/devui.py` |
 | Teams cards, parser, and local auth guards | `PYTHONPATH=src python -m intake_teams.demo --verbose` | `src/intake_teams/demo/` |
 | Deployed Responses-protocol agent | `python hosted_main.py` | `hosted_main.py` -> `src/intake_agent/hosted.py` |
+| Private prompt-agent MCP service | `python -m uvicorn intake_mcp.main:app --port 8080` | `src/intake_mcp/` |
 | Azure Functions workers | Deployed by `azd deploy` | `src/intake_workers/function_app.py` |
 
 The local API is the fastest way to understand the deterministic behavior. Use
@@ -59,6 +60,7 @@ Foundry behavior around the same application service.
 | Submission for review | Implemented | Enforces state, revision, blocking-gap, and quality checks, then freezes the revision. |
 | Review decisions | Partial | Works through the local development adapter for approve, reject, and request changes. It is deliberately absent from Hosted Agent tools until verified reviewer claims are available. |
 | Foundry Hosted Agent | Implemented for requester actions | Exposes context, one-field update, submit, and list tools over the Responses protocol. |
+| Foundry Prompt Agent | Implemented; live consent acceptance pending | Uses the same model and deterministic operations through a private delegated-identity MCP service. |
 | Local FastAPI API | Implemented | Exposes the complete local command flow, including a development-only review route. |
 | Agent Framework DevUI | Implemented for local development | Uses the Hosted Agent instructions and tools with a fixed local identity. |
 | In-memory persistence | Implemented | Mirrors request, ETag, outbox, and idempotency interfaces for local use and tests. |
@@ -81,14 +83,17 @@ flowchart TD
     User[Requester]
 
     User --> Foundry[Foundry Responses protocol]
+    User --> Prompt[Foundry Prompt Agent]
     User --> HTTP[Local FastAPI]
     User --> DevUI[Local Agent Framework DevUI]
 
     Foundry --> Hosted[HostedRuntime and Foundry tools]
+    Prompt --> MCP[Private MCP service]
     DevUI --> Hosted
     HTTP --> Local[LocalAdapter]
 
     Hosted --> App[IntakeApplication]
+    MCP --> App
     Local --> App
 
     App --> Handlers[Command handlers]
@@ -539,7 +544,34 @@ confirmation before submission.
    repositories.
 5. The host exposes `/responses`, `/health`, and SDK readiness behavior.
 
-### 5.9 Local HTTP API and DevUI
+### 5.9 Foundry Prompt Agent and private MCP service
+
+**Status:** Source, infrastructure, deployment, and tests are implemented. Live
+delegated consent and two-user acceptance run after the next approved deploy.
+
+`prompt-intake-agent` is a declarative `PromptAgentDefinition`; it is not a
+second Hosted Agent. Its source-controlled manifest and instructions live in
+`agents/prompt-intake-agent/`.
+
+The private MCP service in `src/intake_mcp/`:
+
+1. validates a same-tenant delegated Entra token;
+2. derives a pseudonymous requester from verified `tid` and `oid`;
+3. exposes the same four requester tool names as the Hosted Agent;
+4. requires `start_new=true` for explicit creation and an authorized
+   `request_id` for later reads or mutations; and
+5. calls the same `IntakeApplication` and durable repositories.
+
+Request IDs are not capabilities. Shared domain handlers verify tenant and
+requester ownership before context reads, field updates, submission, review, or
+idempotent replay. Unauthorized access returns not found to avoid disclosing
+request existence.
+
+The Hosted Agent and Prompt Agent use different identity sources and therefore
+different request sets. Do not add automatic linking between Foundry's opaque
+Hosted Agent user key and an Entra object ID.
+
+### 5.10 Local HTTP API and DevUI
 
 #### Local HTTP API
 
@@ -590,7 +622,7 @@ and must not become a production ingress.
 DevUI refuses to start unless `INTAKE_ENVIRONMENT=local`. Its optional package
 is not installed in the production Hosted Agent build.
 
-### 5.10 Persistence, concurrency, and idempotency
+### 5.11 Persistence, concurrency, and idempotency
 
 **Status:** Implemented at the repository and handler layers.
 
@@ -642,7 +674,7 @@ The handler contracts support caller-stable idempotency keys. The current
 or model-tool retry does not currently reuse a key supplied by the original
 caller. Preserve the handler behavior when adding a stable transport-level key.
 
-### 5.11 Domain events, outbox, and workers
+### 5.12 Domain events, outbox, and workers
 
 **Status:** Outbox persistence and dispatch are implemented; downstream event
 processing is scaffolded.
@@ -690,7 +722,7 @@ There is no integration or completion worker implementation yet. Do not treat
 the target workflows in `architecture.md` as executable until handlers,
 contracts, triggers, retry policy, dead-letter handling, and tests are added.
 
-### 5.12 Artifact storage
+### 5.13 Artifact storage
 
 **Status:** Storage adapter implemented; feature workflow not composed.
 
@@ -714,7 +746,7 @@ and `document_worker` does not invoke it. A complete document feature still
 needs immutable-revision loading, generation, validation, storage, result
 recording, and event emission.
 
-### 5.13 Teams assets and adapter boundary
+### 5.14 Teams assets and adapter boundary
 
 **Status:** Partial and intentionally isolated from the backend packages.
 
@@ -761,7 +793,7 @@ recording, and event emission.
 - Teams publication still requires tenant, Bot Service, manifest, consent, and
   admin work described in `docs/teams/publishing-spike.md`.
 
-### 5.14 Evaluation and quality gates
+### 5.15 Evaluation and quality gates
 
 **Status:** Implemented for local tests, scorecards, and Foundry smoke
 configuration.
@@ -812,7 +844,7 @@ The current `.github/workflows/ci.yml` marks its Python and security jobs
 local commands above before opening a pull request; a green workflow alone does
 not currently prove that every Python gate passed.
 
-### 5.15 Azure provisioning and deployment
+### 5.16 Azure provisioning and deployment
 
 **Status:** Infrastructure and deployment definitions are present; execution is
 environment-dependent.
@@ -821,20 +853,14 @@ environment-dependent.
 
 | Component | Responsibility |
 |---|---|
-| `infra/main.bicep` | Subscription-scope orchestration and azd outputs. |
-| `infra/modules/` | Monitoring, network, identities, Key Vault, Storage, Cosmos, Service Bus, Search, Functions, Container Apps, Foundry, and Bot modules. |
+| `infra/main.bicep` | Resource-group-scope orchestration and azd outputs. |
+| `infra/modules/` | Monitoring, network, identities, Key Vault, Storage, Cosmos, Service Bus, Search, Functions, Container Apps, private MCP, Foundry, and Bot modules. |
 | `azure.yaml` | Foundry agent, Functions, Bicep, environment, and packaging contract. |
 | `scripts/azure/preflight.*` | Checks subscription, providers, RBAC signals, quota, and region readiness. |
 | `scripts/azure/post-deploy-verify.*` | Checks resources, data shape, queues, identities, Functions, and network. |
 
-**Feature gates**
-
-| Bicep parameter | Default | Purpose |
-|---|---:|---|
-| `deployFoundry` | `false` | Create Foundry account, project, model, and capability host. |
-| `deployBotService` | `false` | Create Bot Service and Teams channel after the publishing/auth spike is resolved. |
-| `deployPrivateEndpoints` | `false` | Enable the complete private data-plane topology after connectivity validation. |
-| `deployStoragePrivateEndpoint` | `false` | Enable only the storage private endpoint needed by the FC1 deployment path. |
+Foundry and private endpoints are unconditional architecture. Bot Service remains
+the only gated component through `deployBotService`.
 
 **azd workflow**
 
@@ -843,15 +869,20 @@ environment-dependent.
 3. Run the preflight hook.
 4. Review `azd provision --preview --no-prompt`.
 5. Run `azd provision --no-prompt`.
-6. `infra/main.bicep` creates the resource group and modules, then exports
-   service configuration.
-7. Run `azd deploy --no-prompt`.
-8. The Hosted Agent remote build installs the root `requirements.txt` and
+6. Build the MCP image in the existing private ACR and set
+   `INTAKE_MCP_IMAGE`.
+7. `infra/main.bicep` provisions the private MCP runtime and exports service
+   configuration.
+8. Run `azd deploy --no-prompt`.
+9. The Hosted Agent remote build installs the root `requirements.txt` and
    starts `hosted_main.py` on Python 3.13.
-9. The Functions prepackage hook copies `intake_domain` and
+10. The Functions prepackage hook copies `intake_domain` and
    `intake_persistence` beside `function_app.py`; the worker runs on Python
    3.11.
-10. Run post-deploy verification and a private-network Hosted Agent smoke test.
+11. Upsert the delegated MCP project connection and deploy the immutable Prompt
+    Agent version.
+12. Run blocking post-deploy verification for both agent surfaces and the
+    private MCP path.
 
 All runtime service authentication uses managed identity. Do not add account
 keys, connection strings, client secrets, or Service Bus SAS policies.
@@ -884,6 +915,11 @@ Any non-local Hosted Agent requires:
 If a deployed runtime selects an in-memory backend or omits required Azure
 values, startup raises `IntakeConfigurationError` instead of silently losing
 state.
+
+The MCP runtime additionally requires `INTAKE_MCP_TENANT_ID`,
+`INTAKE_MCP_AUDIENCE`, `INTAKE_MCP_SERVER_URL`, and
+`INTAKE_MCP_REQUIRED_SCOPE`. It rejects missing, wrong-tenant, wrong-audience,
+expired, or insufficient-scope delegated tokens.
 
 See `docs/contracts/infrastructure-config.md` for the complete environment,
 container, partition-key, package, and RBAC contract.

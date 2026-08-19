@@ -236,8 +236,8 @@ def test_reviewer_approve_transitions_to_approved(client):
     assert resp.json()["new_status"] == "approved"
 
 
-def test_non_reviewer_approve_returns_403(client):
-    """Unlisted actor receives requester role; domain handler rejects with 403."""
+def test_non_reviewer_approve_returns_404(client):
+    """A non-owner requester cannot use a request ID to discover review state."""
     rid, sub_rev = _create_and_submit(client, uid="u-norev", conv="norev-1")
 
     resp = client.post(f"/requests/{rid}/review", json={
@@ -246,9 +246,9 @@ def test_non_reviewer_approve_returns_403(client):
         "rationale": "I should not be allowed.",
         "reviewer_id": "not-a-reviewer",
     })
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text}"
+    assert resp.status_code == 404, f"Expected 404, got {resp.status_code}: {resp.text}"
     detail = resp.json()["detail"]
-    assert detail["error_code"] == "AUTHORIZATION_DENIED"
+    assert detail["error_code"] == "NOT_FOUND"
     assert detail["retry_eligible"] is False
 
 
@@ -349,7 +349,7 @@ def test_document_review_actor_enforcement():
     See also: tests/security/test_local_adapter_authz.py for unit-level coverage.
     """
     # Scenario A already covered end-to-end by test_reviewer_approve_transitions_to_approved
-    # Scenario B already covered end-to-end by test_non_reviewer_approve_returns_403
+    # Scenario B already covered end-to-end by test_non_reviewer_approve_returns_404
     # Scenario C: Directly probe _resolve_local_dev_actor with a non-local settings object.
     from intake_agent.adapter.local import _resolve_local_dev_actor
     from intake_agent.config import IntakeSettings
@@ -374,5 +374,3 @@ def test_second_default_reviewer_id_also_succeeds(client):
     })
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
     assert resp.json()["new_status"] == "approved"
-
-
