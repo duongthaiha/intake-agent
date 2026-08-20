@@ -85,6 +85,8 @@ class Receiver(Protocol):
 class ServiceBusClient(Protocol):
     def get_queue_sender(self, *, queue_name: str) -> Sender: ...
 
+    def get_topic_sender(self, *, topic_name: str) -> Sender: ...
+
     def get_queue_receiver(self, **kwargs: Any) -> Receiver: ...
 
 
@@ -95,17 +97,27 @@ class ServiceBusOutboxDispatcher:
         self,
         outbox: OutboxRepository,
         client: ServiceBusClient,
-        queue_name: str,
+        queue_name: str | None = None,
+        *,
+        topic_name: str | None = None,
     ) -> None:
+        if bool(queue_name) == bool(topic_name):
+            raise ValueError("Exactly one Service Bus queue or topic is required.")
         self._outbox = outbox
         self._client = client
         self._queue_name = queue_name
+        self._topic_name = topic_name
 
     def dispatch_pending(self, batch_size: int = 25) -> int:
         pending = self._outbox.get_pending(batch_size)
         dispatched: list[OutboxEvent] = []
         try:
-            with self._client.get_queue_sender(queue_name=self._queue_name) as sender:
+            sender_context = (
+                self._client.get_topic_sender(topic_name=self._topic_name)
+                if self._topic_name
+                else self._client.get_queue_sender(queue_name=self._queue_name or "")
+            )
+            with sender_context as sender:
                 for event in pending:
                     sender.send_messages(_message_for_event(event))
                     dispatched.append(event)

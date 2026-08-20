@@ -88,6 +88,24 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2026-05-01' = {
   }
 }
 
+resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+  parent: account
+  name: 'gpt-4.1-mini'
+  sku: {
+    name: 'DataZoneStandard'
+    capacity: 10
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-4.1-mini'
+      version: '2025-04-14'
+    }
+    raiPolicyName: 'Microsoft.DefaultV2'
+    versionUpgradeOption: 'OnceNewDefaultVersionAvailable'
+  }
+}
+
 resource cosmosConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2026-05-01' = {
   parent: project
   name: 'intake-cosmos'
@@ -160,6 +178,7 @@ output foundry object = {
   projectId: project.id
   projectName: project.name
   projectPrincipalId: project.identity.principalId
+  modelDeploymentName: modelDeployment.name
   connectionNames: {
     cosmos: cosmosConnection.name
     storage: storageConnection.name

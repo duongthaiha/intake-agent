@@ -45,40 +45,69 @@ if (-not $environment.domain -or -not $environment.ip) {
   throw 'Container Apps environment did not return an internal default domain and static IP.'
 }
 
-Invoke-Az -Description 'Create the Container Apps private DNS zone' -Command {
-  az network private-dns zone create `
-    --resource-group $ResourceGroup `
-    --name $environment.domain `
-    --only-show-errors
-} | Out-Null
+$zone = az network private-dns zone show `
+  --resource-group $ResourceGroup `
+  --name $environment.domain `
+  --query name `
+  --output tsv `
+  --only-show-errors 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $zone) {
+  Invoke-Az -Description 'Create the Container Apps private DNS zone' -Command {
+    az network private-dns zone create `
+      --resource-group $ResourceGroup `
+      --name $environment.domain `
+      --only-show-errors
+  } | Out-Null
+}
 
-Invoke-Az -Description 'Link the Container Apps private DNS zone' -Command {
-  az network private-dns link vnet create `
-    --resource-group $ResourceGroup `
-    --zone-name $environment.domain `
-    --name 'intake-vnet' `
-    --virtual-network $VirtualNetworkId `
-    --registration-enabled false `
-    --only-show-errors
-} | Out-Null
+$link = az network private-dns link vnet show `
+  --resource-group $ResourceGroup `
+  --zone-name $environment.domain `
+  --name 'intake-vnet' `
+  --query name `
+  --output tsv `
+  --only-show-errors 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $link) {
+  Invoke-Az -Description 'Link the Container Apps private DNS zone' -Command {
+    az network private-dns link vnet create `
+      --resource-group $ResourceGroup `
+      --zone-name $environment.domain `
+      --name 'intake-vnet' `
+      --virtual-network $VirtualNetworkId `
+      --registration-enabled false `
+      --only-show-errors
+  } | Out-Null
+}
 
 foreach ($recordName in @('@', '*')) {
-  Invoke-Az -Description "Create DNS record set '$recordName'" -Command {
-    az network private-dns record-set a create `
+  $addresses = az network private-dns record-set a show `
+    --resource-group $ResourceGroup `
+    --zone-name $environment.domain `
+    --name $recordName `
+    --query 'aRecords[].ipv4Address' `
+    --output tsv `
+    --only-show-errors 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Invoke-Az -Description "Create DNS record set '$recordName'" -Command {
+      az network private-dns record-set a create `
       --resource-group $ResourceGroup `
       --zone-name $environment.domain `
       --name $recordName `
       --ttl 300 `
       --only-show-errors
-  } | Out-Null
-  Invoke-Az -Description "Add DNS record '$recordName'" -Command {
-    az network private-dns record-set a add-record `
+    } | Out-Null
+    $addresses = @()
+  }
+  if ($addresses -notcontains $environment.ip) {
+    Invoke-Az -Description "Add DNS record '$recordName'" -Command {
+      az network private-dns record-set a add-record `
       --resource-group $ResourceGroup `
       --zone-name $environment.domain `
       --record-set-name $recordName `
       --ipv4-address $environment.ip `
       --only-show-errors
-  } | Out-Null
+    } | Out-Null
+  }
 }
 
 Write-Host "Configured private DNS for $($environment.domain) -> $($environment.ip)."

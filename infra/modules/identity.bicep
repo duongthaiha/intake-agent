@@ -36,6 +36,10 @@ var identityDefinitions = [
     key: 'evaluationJob'
     name: 'id-intake-evaluation-${suffix}'
   }
+  {
+    key: 'foundryConfigurator'
+    name: 'id-intake-foundry-config-${suffix}'
+  }
 ]
 
 resource identities 'Microsoft.ManagedIdentity/userAssignedIdentities@2024-11-30' = [
@@ -88,5 +92,11 @@ output identities object = {
     name: identities[6].name
     clientId: identities[6].properties.clientId
     principalId: identities[6].properties.principalId
+  }
+  foundryConfigurator: {
+    id: identities[7].id
+    name: identities[7].name
+    clientId: identities[7].properties.clientId
+    principalId: identities[7].properties.principalId
   }
 }

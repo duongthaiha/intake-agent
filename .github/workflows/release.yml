@@ -97,6 +97,13 @@ jobs:
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           DEPLOYMENT_VARIANT: ${{ inputs.deployment_variant }}
+          COMMAND_SERVICE_IMAGE: ${{ vars.COMMAND_SERVICE_IMAGE }}
+          WORKERS_IMAGE: ${{ vars.WORKERS_IMAGE }}
+          EVALUATION_IMAGE: ${{ vars.EVALUATION_IMAGE }}
+          FOUNDRY_CONFIGURATION_IMAGE: ${{ vars.FOUNDRY_CONFIGURATION_IMAGE }}
+          HOSTED_AGENT_IMAGE: ${{ vars.HOSTED_AGENT_IMAGE }}
+          FOUNDRY_OAUTH_CLIENT_ID: ${{ vars.FOUNDRY_OAUTH_CLIENT_ID }}
+          EVALUATION_COMMIT_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
           test "$AZURE_ENV_NAME" = "test" || {
@@ -106,7 +113,18 @@ jobs:
           azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
-          azd env set DEPLOYMENT_VARIANT "$DEPLOYMENT_VARIANT"
+          azd env set AZURE_NETWORK_MODE "$DEPLOYMENT_VARIANT"
+          azd env set AZURE_DEPLOY_WORKLOADS true
+          azd env set AZURE_DEPLOY_WORKERS true
+          azd env set AZURE_DEPLOY_EVALUATION true
+          azd env set AZURE_DEPLOY_FOUNDRY_CONFIGURATION true
+          azd env set COMMAND_SERVICE_IMAGE "$COMMAND_SERVICE_IMAGE"
+          azd env set WORKERS_IMAGE "$WORKERS_IMAGE"
+          azd env set EVALUATION_IMAGE "$EVALUATION_IMAGE"
+          azd env set FOUNDRY_CONFIGURATION_IMAGE "$FOUNDRY_CONFIGURATION_IMAGE"
+          azd env set HOSTED_AGENT_IMAGE "$HOSTED_AGENT_IMAGE"
+          azd env set FOUNDRY_OAUTH_CLIENT_ID "$FOUNDRY_OAUTH_CLIENT_ID"
+          azd env set EVALUATION_COMMIT_SHA "$EVALUATION_COMMIT_SHA"
 
       - name: Clean-environment deployment through azd
         shell: bash
@@ -226,16 +244,34 @@ jobs:
           AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           DEPLOYMENT_VARIANT: ${{ inputs.deployment_variant }}
+          COMMAND_SERVICE_IMAGE: ${{ vars.COMMAND_SERVICE_IMAGE }}
+          WORKERS_IMAGE: ${{ vars.WORKERS_IMAGE }}
+          EVALUATION_IMAGE: ${{ vars.EVALUATION_IMAGE }}
+          FOUNDRY_CONFIGURATION_IMAGE: ${{ vars.FOUNDRY_CONFIGURATION_IMAGE }}
+          HOSTED_AGENT_IMAGE: ${{ vars.HOSTED_AGENT_IMAGE }}
+          FOUNDRY_OAUTH_CLIENT_ID: ${{ vars.FOUNDRY_OAUTH_CLIENT_ID }}
+          EVALUATION_COMMIT_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -euo pipefail
-          test "$AZURE_ENV_NAME" = "production" || {
-            echo "::error::production GitHub Environment must select the production azd environment"
+          test "$AZURE_ENV_NAME" = "prod" || {
+            echo "::error::production GitHub Environment must select the prod azd environment"
             exit 1
           }
           azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
           azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
-          azd env set DEPLOYMENT_VARIANT "$DEPLOYMENT_VARIANT"
+          azd env set AZURE_NETWORK_MODE "$DEPLOYMENT_VARIANT"
+          azd env set AZURE_DEPLOY_WORKLOADS true
+          azd env set AZURE_DEPLOY_WORKERS true
+          azd env set AZURE_DEPLOY_EVALUATION true
+          azd env set AZURE_DEPLOY_FOUNDRY_CONFIGURATION true
+          azd env set COMMAND_SERVICE_IMAGE "$COMMAND_SERVICE_IMAGE"
+          azd env set WORKERS_IMAGE "$WORKERS_IMAGE"
+          azd env set EVALUATION_IMAGE "$EVALUATION_IMAGE"
+          azd env set FOUNDRY_CONFIGURATION_IMAGE "$FOUNDRY_CONFIGURATION_IMAGE"
+          azd env set HOSTED_AGENT_IMAGE "$HOSTED_AGENT_IMAGE"
+          azd env set FOUNDRY_OAUTH_CLIENT_ID "$FOUNDRY_OAUTH_CLIENT_ID"
+          azd env set EVALUATION_COMMIT_SHA "$EVALUATION_COMMIT_SHA"
 
       - name: Promote through the same azd contract
         run: azd up --no-prompt

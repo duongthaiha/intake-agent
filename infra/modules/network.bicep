@@ -7,6 +7,9 @@ param suffix string
 @description('Common resource tags.')
 param tags object
 
+@description('Workload route table resource ID.')
+param routeTableId string
+
 @description('Address space for the dedicated application virtual network.')
 param virtualNetworkAddressPrefix string = '10.42.0.0/16'
 
@@ -123,6 +126,9 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2025-01-01' = {
           networkSecurityGroup: {
             id: foundryNsg.id
           }
+          routeTable: {
+            id: routeTableId
+          }
           delegations: [
             {
               name: 'foundry-agent-injection'
@@ -142,6 +148,9 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2025-01-01' = {
           networkSecurityGroup: {
             id: containerAppsNsg.id
           }
+          routeTable: {
+            id: routeTableId
+          }
           delegations: [
             {
               name: 'container-apps-environment'
@@ -160,6 +169,9 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2025-01-01' = {
           addressPrefix: functionsSubnetPrefix
           networkSecurityGroup: {
             id: functionsNsg.id
+          }
+          routeTable: {
+            id: routeTableId
           }
           delegations: [
             {

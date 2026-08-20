@@ -63,20 +63,21 @@ x-runtimeMappings:
     imageEnvironmentVariable: EVALUATION_IMAGE
   hosted-agent:
     provisioner: azure.ai.agents azd extension
-    artifact: src/agents/hosted
-    status: blocked-until-runtime-artifact-exists
+    artifact: foundry/hosted
+    imageEnvironmentVariable: HOSTED_AGENT_IMAGE
+    status: configured-by-private-foundry-job
   prompt-agent:
     provisioner: Microsoft Foundry configuration
-    artifact: config/foundry/prompt-agent
-    status: blocked-until-runtime-artifact-exists
+    artifact: packages/intake-foundry-prompt/src/intake_foundry_prompt/prompt-agents.json
+    status: configured-by-private-foundry-job
   requester-toolbox:
     provisioner: Microsoft Foundry Toolbox
-    artifact: config/foundry/toolboxes/requester
-    status: blocked-until-oauth-and-runtime-artifacts-exist
+    artifact: foundry/toolboxes/requester-toolbox.yaml
+    status: configured-by-private-foundry-job
   reviewer-toolbox:
     provisioner: Microsoft Foundry Toolbox
-    artifact: config/foundry/toolboxes/reviewer
-    status: blocked-until-oauth-and-runtime-artifacts-exist
+    artifact: foundry/toolboxes/reviewer-toolbox.yaml
+    status: configured-by-private-foundry-job
 hooks:
   preprovision:
     windows:

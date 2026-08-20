@@ -1,5 +1,6 @@
 """Deterministic Intake Agent domain package."""
 
+from intake_domain.defaults import default_template
 from intake_domain.errors import DomainError, ErrorCode
 from intake_domain.models import (
     ActorContext,
@@ -69,6 +70,7 @@ __all__ = [
     "authorize_owner",
     "authorize_reviewer",
     "build_revision",
+    "default_template",
     "evaluate_request",
     "validate_candidate",
     "validate_transition",

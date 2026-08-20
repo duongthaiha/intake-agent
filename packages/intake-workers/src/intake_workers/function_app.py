@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -12,6 +13,7 @@ from intake_workers.hosts import WorkerHosts
 
 app = func.FunctionApp()
 _hosts_provider: Callable[[], WorkerHosts] | None = None
+_worker_kind = os.environ.get("WORKER_KIND", "all")
 
 
 def configure_hosts(provider: Callable[[], WorkerHosts]) -> None:
@@ -22,50 +24,64 @@ def configure_hosts(provider: Callable[[], WorkerHosts]) -> None:
     _hosts_provider = provider
 
 
-@app.timer_trigger(
-    arg_name="timer",
-    schedule="0 */5 * * * *",
-    run_on_startup=False,
-)
-def outbox_dispatcher(timer: func.TimerRequest) -> None:
-    del timer
-    _hosts().outbox.run()
+if _worker_kind in {"all", "outbox"}:
+
+    @app.timer_trigger(
+        arg_name="timer",
+        schedule="0 */5 * * * *",
+        run_on_startup=False,
+    )
+    def outbox_dispatcher(timer: func.TimerRequest) -> None:
+        del timer
+        _hosts().outbox.run()
 
 
-@app.service_bus_queue_trigger(
-    arg_name="message",
-    queue_name="%INTAKE_NOTIFICATION_QUEUE%",
-    connection="INTAKE_SERVICEBUS_NAMESPACE",
-)
-def notification_worker(message: func.ServiceBusMessage) -> None:
-    _invoke_auto_settled(_hosts().notification, message)
+if _worker_kind in {"all", "notification"}:
+
+    @app.service_bus_topic_trigger(
+        arg_name="message",
+        topic_name="%SERVICE_BUS_TOPIC%",
+        subscription_name="%SERVICE_BUS_SUBSCRIPTION%",
+        connection="INTAKE_SERVICEBUS_NAMESPACE",
+    )
+    def notification_worker(message: func.ServiceBusMessage) -> None:
+        _invoke_auto_settled(_hosts().notification, message)
 
 
-@app.service_bus_queue_trigger(
-    arg_name="message",
-    queue_name="%INTAKE_INTEGRATION_QUEUE%",
-    connection="INTAKE_SERVICEBUS_NAMESPACE",
-)
-def integration_worker(message: func.ServiceBusMessage) -> None:
-    _invoke_auto_settled(_hosts().integration, message)
+if _worker_kind in {"all", "integration"}:
+
+    @app.service_bus_topic_trigger(
+        arg_name="message",
+        topic_name="%SERVICE_BUS_TOPIC%",
+        subscription_name="%SERVICE_BUS_SUBSCRIPTION%",
+        connection="INTAKE_SERVICEBUS_NAMESPACE",
+    )
+    def integration_worker(message: func.ServiceBusMessage) -> None:
+        _invoke_auto_settled(_hosts().integration, message)
 
 
-@app.service_bus_queue_trigger(
-    arg_name="message",
-    queue_name="%INTAKE_COMPLETION_QUEUE%",
-    connection="INTAKE_SERVICEBUS_NAMESPACE",
-)
-def completion_worker(message: func.ServiceBusMessage) -> None:
-    _invoke_auto_settled(_hosts().completion, message)
+if _worker_kind in {"all", "completion"}:
+
+    @app.service_bus_topic_trigger(
+        arg_name="message",
+        topic_name="%SERVICE_BUS_TOPIC%",
+        subscription_name="%SERVICE_BUS_SUBSCRIPTION%",
+        connection="INTAKE_SERVICEBUS_NAMESPACE",
+    )
+    def completion_worker(message: func.ServiceBusMessage) -> None:
+        _invoke_auto_settled(_hosts().completion, message)
 
 
-@app.service_bus_queue_trigger(
-    arg_name="message",
-    queue_name="%INTAKE_RETENTION_QUEUE%",
-    connection="INTAKE_SERVICEBUS_NAMESPACE",
-)
-def retention_worker(message: func.ServiceBusMessage) -> None:
-    _invoke_auto_settled(_hosts().retention, message)
+if _worker_kind in {"all", "retention"}:
+
+    @app.service_bus_topic_trigger(
+        arg_name="message",
+        topic_name="%SERVICE_BUS_TOPIC%",
+        subscription_name="%SERVICE_BUS_SUBSCRIPTION%",
+        connection="INTAKE_SERVICEBUS_NAMESPACE",
+    )
+    def retention_worker(message: func.ServiceBusMessage) -> None:
+        _invoke_auto_settled(_hosts().retention, message)
 
 
 def _hosts() -> WorkerHosts:

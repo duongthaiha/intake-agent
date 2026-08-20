@@ -15,11 +15,11 @@ object model:
   calls the documented Microsoft 365 publish API using an existing Azure Bot
   Service ARM ID; it does not create or modify infrastructure.
 
-Run `scripts/foundry/create-connections.ps1` after supplying the environment
-variables shown in `connections/.env.example`, then create the two Toolbox
-versions with `scripts/foundry/create-toolboxes.ps1`. Create Prompt Agent
-versions through `intake_foundry_prompt.create_version`, test them, and only
-then pin and enable their endpoints with `configure_endpoint`.
+Production configuration runs `scripts/foundry/configure_live.py` in the private
+managed-identity configuration job. It creates the OAuth connections, Toolbox
+versions and defaults, Prompt Agent versions, and digest-pinned Hosted Agent versions,
+then waits for Hosted readiness. The PowerShell scripts remain useful for governed
+operator-driven setup and diagnostics.
 
 Prompt Agent definitions do not have a supported deterministic per-turn
 pre-tool hook. Their remote MCP connection placeholders must therefore target
@@ -27,14 +27,17 @@ an agent-safe gateway that enforces the capabilities declared in
 `prompt-agents.json`: context reload, `allowedActions` gating, trusted
 provenance/correlation injection, and no automatic mutation replay. Do not point
 the Prompt Agent Toolbox at an unrestricted application MCP surface. This
-repository version-controls and validates that requirement; deploying the
-gateway remains blocked on the production MCP adapter owned by the runtime
-integration branch.
+repository version-controls and validates that requirement; the deployed production
+MCP adapter enforces it before deterministic application execution.
 
 OAuth consent is a normal incomplete response, not a failed mutation. Surface
 the consent URL, wait for the user to consent, and retry the original turn with
 the same Foundry conversation or previous response ID. The first operation on
 the resumed requester turn is always `get_intake_context`.
+
+The Hosted image intentionally uses the Foundry-supported root execution model because
+the platform reserves and mounts `/home/session`, while Responses hosting creates
+`/home/session/.sessions`. Other application and configuration images remain non-root.
 
 After creating a Prompt Agent version, grant its generated identity project
 access before invoking its Toolbox:

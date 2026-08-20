@@ -17,6 +17,7 @@ var storageBlobDataContributor = subscriptionResourceId('Microsoft.Authorization
 var storageBlobDataOwner = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
 var storageAccountContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')
 var acrPull = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
+var acrRepositoryReader = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b93aa761-3e63-49ed-ac28-beffa264f7ac')
 var serviceBusDataSender = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '69a216fc-b8fb-44d8-bc22-1f3c2cd27a39')
 var serviceBusDataReceiver = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0')
 var keyVaultSecretsUser = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
@@ -26,6 +27,7 @@ var searchServiceContributor = subscriptionResourceId('Microsoft.Authorization/r
 var searchIndexDataReader = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '1407120a-92aa-4202-b7e9-c0e197c71c8f')
 var monitoringMetricsPublisher = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '3913510d-42f4-4e42-8a64-420c390055eb')
 var foundryUser = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')
+var cognitiveServicesContributor = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68')
 
 resource storage 'Microsoft.Storage/storageAccounts@2026-04-01' existing = {
   name: resources.storageName
@@ -80,6 +82,8 @@ var allWorkloadPrincipals = [
   identities.completionWorker.principalId
   identities.retentionWorker.principalId
   identities.evaluationJob.principalId
+  identities.foundryConfigurator.principalId
+  foundryProjectPrincipalId
 ]
 
 resource acrPullAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
@@ -94,8 +98,17 @@ resource acrPullAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01'
   }
 ]
 
+resource foundryProjectAcrRepositoryReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(registry.id, foundryProjectPrincipalId, acrRepositoryReader)
+  scope: registry
+  properties: {
+    principalId: foundryProjectPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: acrRepositoryReader
+  }
+}
+
 var storageContributors = [
-  identities.retentionWorker.principalId
   identities.evaluationJob.principalId
 ]
 
@@ -127,6 +140,26 @@ resource storageAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01'
       principalId: principalId
       principalType: 'ServicePrincipal'
       roleDefinitionId: storageBlobDataContributor
+    }
+  }
+]
+
+var workerHostStorageOwners = [
+  identities.outboxWorker.principalId
+  identities.notificationWorker.principalId
+  identities.integrationWorker.principalId
+  identities.completionWorker.principalId
+  identities.retentionWorker.principalId
+]
+
+resource workerHostStorageAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for principalId in workerHostStorageOwners: {
+    name: guid(storage.id, principalId, storageBlobDataOwner)
+    scope: storage
+    properties: {
+      principalId: principalId
+      principalType: 'ServicePrincipal'
+      roleDefinitionId: storageBlobDataOwner
     }
   }
 ]
@@ -171,6 +204,7 @@ var keyVaultReaders = [
   identities.notificationWorker.principalId
   identities.integrationWorker.principalId
   identities.retentionWorker.principalId
+  identities.foundryConfigurator.principalId
 ]
 
 resource keyVaultAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
@@ -225,6 +259,26 @@ resource evaluationFoundryUser 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
+resource foundryConfiguratorUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(foundryProject.id, identities.foundryConfigurator.principalId, foundryUser)
+  scope: foundryProject
+  properties: {
+    principalId: identities.foundryConfigurator.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: foundryUser
+  }
+}
+
+resource foundryConfiguratorContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(foundryProject.id, identities.foundryConfigurator.principalId, cognitiveServicesContributor)
+  scope: foundryProject
+  properties: {
+    principalId: identities.foundryConfigurator.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: cognitiveServicesContributor
+  }
+}
+
 resource telemetryPublishers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
   for principalId in allWorkloadPrincipals: {
     name: guid(applicationInsights.id, principalId, monitoringMetricsPublisher)
@@ -250,6 +304,7 @@ resource evaluationSearchReader 'Microsoft.Authorization/roleAssignments@2022-04
 var cosmosContributors = [
   identities.commandService.principalId
   identities.outboxWorker.principalId
+  identities.notificationWorker.principalId
   identities.integrationWorker.principalId
   identities.completionWorker.principalId
   identities.retentionWorker.principalId

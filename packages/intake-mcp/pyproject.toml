@@ -12,7 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-server = ["mcp>=2.0.0,<3"]
+server = [
+    "mcp>=2.0.0,<3",
+    "uvicorn>=0.35.0,<1",
+]
 
 [project.scripts]
 intake-local = "intake_mcp.server:main"

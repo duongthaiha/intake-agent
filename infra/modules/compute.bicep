@@ -1,6 +1,15 @@
 @description('Deploy runtime resource placeholders only after immutable images are available.')
 param deployWorkloads bool = false
 
+@description('Deploy asynchronous worker applications.')
+param deployWorkers bool = deployWorkloads
+
+@description('Deploy the evaluation job.')
+param deployEvaluation bool = deployWorkloads
+
+@description('Deploy the private Foundry configuration job.')
+param deployFoundryConfiguration bool = false
+
 @description('Azure region for runtime resources.')
 param location string
 
@@ -31,8 +40,16 @@ param workersImage string = 'runtime-artifact-required'
 @description('Immutable evaluation-job container image reference.')
 param evaluationImage string = 'runtime-artifact-required'
 
+@description('Immutable Foundry configuration container image reference.')
+param foundryConfigurationImage string = 'runtime-artifact-required'
+
+@description('Immutable Foundry Hosted Agent image reference.')
+param hostedAgentImage string = 'runtime-artifact-required'
+
+var commandServiceName = 'ca-intake-command-${suffix}'
+
 resource commandService 'Microsoft.App/containerApps@2026-01-01' = if (deployWorkloads) {
-  name: 'ca-intake-command-${suffix}'
+  name: commandServiceName
   location: location
   tags: union(tags, {
     'azd-service-name': 'command-service'
@@ -81,7 +98,7 @@ resource commandService 'Microsoft.App/containerApps@2026-01-01' = if (deployWor
             }
             {
               name: 'SERVICE_BUS_NAMESPACE'
-              value: configuration.serviceBusNamespace
+              value: '${configuration.serviceBusNamespace}.servicebus.windows.net'
             }
             {
               name: 'SERVICE_BUS_TOPIC'
@@ -94,6 +111,34 @@ resource commandService 'Microsoft.App/containerApps@2026-01-01' = if (deployWor
             {
               name: 'APPLICATIONINSIGHTS_AUTHENTICATION_STRING'
               value: 'Authorization=AAD;ClientId=${identities.commandService.clientId}'
+            }
+            {
+              name: 'STORAGE_BLOB_ENDPOINT'
+              value: configuration.storageBlobEndpoint
+            }
+            {
+              name: 'ENTRA_TENANT_ID'
+              value: configuration.entraTenantId
+            }
+            {
+              name: 'MCP_AUDIENCE'
+              value: configuration.mcpAudience
+            }
+            {
+              name: 'MCP_REQUIRED_SCOPE'
+              value: configuration.mcpRequiredScope
+            }
+            {
+              name: 'MCP_AUTHORIZED_CLIENT_IDS'
+              value: join(configuration.mcpAuthorizedClientIds, ',')
+            }
+            {
+              name: 'MCP_RESOURCE_SERVER_URL'
+              value: 'https://${commandServiceName}.${environment.defaultDomain}'
+            }
+            {
+              name: 'DEFAULT_REVIEWER_ID'
+              value: 'reviewer-default'
             }
           ]
           resources: {
@@ -139,8 +184,8 @@ var workerDefinitions = [
 ]
 
 resource workers 'Microsoft.App/containerApps@2026-01-01' = [
-  for worker in workerDefinitions: if (deployWorkloads) {
-    name: 'ca-intake-${worker.name}-${suffix}'
+  for worker in workerDefinitions: if (deployWorkers) {
+    name: 'ca-${worker.name}-${suffix}'
     location: location
     kind: 'functionapp'
     tags: union(tags, {
@@ -188,7 +233,7 @@ resource workers 'Microsoft.App/containerApps@2026-01-01' = [
               }
               {
                 name: 'SERVICE_BUS_NAMESPACE'
-                value: configuration.serviceBusNamespace
+                value: '${configuration.serviceBusNamespace}.servicebus.windows.net'
               }
               {
                 name: 'SERVICE_BUS_TOPIC'
@@ -197,6 +242,42 @@ resource workers 'Microsoft.App/containerApps@2026-01-01' = [
               {
                 name: 'SERVICE_BUS_SUBSCRIPTION'
                 value: worker.subscription
+              }
+              {
+                name: 'INTAKE_SERVICEBUS_NAMESPACE__fullyQualifiedNamespace'
+                value: '${configuration.serviceBusNamespace}.servicebus.windows.net'
+              }
+              {
+                name: 'STORAGE_BLOB_ENDPOINT'
+                value: configuration.storageBlobEndpoint
+              }
+              {
+                name: 'ENTRA_TENANT_ID'
+                value: configuration.entraTenantId
+              }
+              {
+                name: 'DEFAULT_REVIEWER_ID'
+                value: 'reviewer-default'
+              }
+              {
+                name: 'AzureWebJobsStorage__accountName'
+                value: configuration.storageAccountName
+              }
+              {
+                name: 'AzureWebJobsStorage__credential'
+                value: 'managedidentity'
+              }
+              {
+                name: 'AzureWebJobsStorage__clientId'
+                value: worker.identity.clientId
+              }
+              {
+                name: 'FUNCTIONS_WORKER_RUNTIME'
+                value: 'python'
+              }
+              {
+                name: 'AzureWebJobsFeatureFlags'
+                value: 'EnableWorkerIndexing'
               }
               {
                 name: 'KEY_VAULT_URI'
@@ -226,7 +307,7 @@ resource workers 'Microsoft.App/containerApps@2026-01-01' = [
   }
 ]
 
-resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployWorkloads) {
+resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployEvaluation) {
   name: 'caj-intake-evaluation-${suffix}'
   location: location
   tags: union(tags, {
@@ -242,7 +323,7 @@ resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployWorkloads) {
     environmentId: environment.id
     workloadProfileName: 'Consumption'
     configuration: {
-      replicaRetryLimit: 1
+      replicaRetryLimit: 0
       replicaTimeout: 3600
       triggerType: 'Manual'
       manualTriggerConfig: {
@@ -275,6 +356,22 @@ resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployWorkloads) {
               value: configuration.storageAccountName
             }
             {
+              name: 'STORAGE_BLOB_ENDPOINT'
+              value: configuration.storageBlobEndpoint
+            }
+            {
+              name: 'EVALUATION_COMMIT_SHA'
+              value: configuration.evaluationCommitSha
+            }
+            {
+              name: 'EVALUATION_RESULTS_CONTAINER'
+              value: 'evaluation-datasets'
+            }
+            {
+              name: 'EVALUATION_EVIDENCE_CONTAINER'
+              value: 'evaluation-evidence'
+            }
+            {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
               value: configuration.applicationInsightsConnectionString
             }
@@ -284,8 +381,110 @@ resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployWorkloads) {
             }
           ]
           resources: {
-            cpu: json('1.0')
-            memory: '2Gi'
+            cpu: json('2.0')
+            memory: '4Gi'
+          }
+        }
+      ]
+    }
+  }
+}
+
+resource foundryConfigurationJob 'Microsoft.App/jobs@2025-01-01' = if (deployFoundryConfiguration) {
+  name: 'caj-foundry-config-${suffix}'
+  location: location
+  tags: union(tags, {
+    'azd-service-name': 'foundry-configuration-job'
+  })
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identities.foundryConfigurator.id}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      replicaRetryLimit: 0
+      replicaTimeout: 1800
+      triggerType: 'Manual'
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: [
+        {
+          identity: identities.foundryConfigurator.id
+          server: registry.loginServer
+        }
+      ]
+      secrets: [
+        {
+          name: 'foundry-oauth-client-secret'
+          keyVaultUrl: '${configuration.keyVaultUri}secrets/intake-foundry-oauth-client-secret'
+          identity: identities.foundryConfigurator.id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'foundry-configuration'
+          image: foundryConfigurationImage
+          env: [
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: identities.foundryConfigurator.clientId
+            }
+            {
+              name: 'AZURE_TENANT_ID'
+              value: configuration.entraTenantId
+            }
+            {
+              name: 'FOUNDRY_PROJECT_ENDPOINT'
+              value: configuration.foundryProjectEndpoint
+            }
+            {
+              name: 'FOUNDRY_PROJECT_RESOURCE_ID'
+              value: configuration.foundryProjectId
+            }
+            {
+              name: 'FOUNDRY_OAUTH_CLIENT_ID'
+              value: configuration.foundryOAuthClientId
+            }
+            {
+              name: 'FOUNDRY_OAUTH_CLIENT_SECRET'
+              secretRef: 'foundry-oauth-client-secret'
+            }
+            {
+              name: 'INTAKE_REQUESTER_MCP_URL'
+              value: 'https://${commandServiceName}.${environment.defaultDomain}/requester/mcp'
+            }
+            {
+              name: 'INTAKE_REVIEWER_MCP_URL'
+              value: 'https://${commandServiceName}.${environment.defaultDomain}/reviewer/mcp'
+            }
+            {
+              name: 'MCP_AUDIENCE'
+              value: configuration.mcpAudience
+            }
+            {
+              name: 'MCP_REQUIRED_SCOPE'
+              value: configuration.mcpRequiredScope
+            }
+            {
+              name: 'AZURE_AI_MODEL_DEPLOYMENT_NAME'
+              value: configuration.foundryModelDeployment
+            }
+            {
+              name: 'HOSTED_AGENT_IMAGE'
+              value: hostedAgentImage
+            }
+          ]
+          resources: {
+            cpu: json('2.0')
+            memory: '4Gi'
           }
         }
       ]
@@ -294,13 +493,14 @@ resource evaluationJob 'Microsoft.App/jobs@2025-01-01' = if (deployWorkloads) {
 }
 
 output workloadResourceNames object = {
-  commandService: deployWorkloads ? commandService.name : 'ca-intake-command-${suffix}'
+  commandService: deployWorkloads ? commandService.name : commandServiceName
   workers: {
-    outbox: 'ca-intake-outbox-${suffix}'
-    notification: 'ca-intake-notification-${suffix}'
-    integration: 'ca-intake-integration-${suffix}'
-    completion: 'ca-intake-completion-${suffix}'
-    retention: 'ca-intake-retention-${suffix}'
+    outbox: 'ca-outbox-${suffix}'
+    notification: 'ca-notification-${suffix}'
+    integration: 'ca-integration-${suffix}'
+    completion: 'ca-completion-${suffix}'
+    retention: 'ca-retention-${suffix}'
   }
-  evaluationJob: deployWorkloads ? evaluationJob.name : 'caj-intake-evaluation-${suffix}'
+  evaluationJob: deployEvaluation ? evaluationJob.name : 'caj-intake-evaluation-${suffix}'
+  foundryConfigurationJob: deployFoundryConfiguration ? foundryConfigurationJob.name : 'caj-foundry-config-${suffix}'
 }

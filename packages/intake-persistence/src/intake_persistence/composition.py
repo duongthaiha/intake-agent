@@ -33,6 +33,7 @@ class AzurePersistenceSettings:
     requests_container: str = "requests"
     idempotency_container: str = "idempotency"
     managed_identity_client_id: str | None = None
+    service_bus_uses_topic: bool = False
 
 
 @dataclass(slots=True)
@@ -77,7 +78,8 @@ def build_azure_persistence(
     dispatcher = ServiceBusOutboxDispatcher(
         outbox,
         cast(ServiceBusClientPort, service_bus_client),
-        settings.service_bus_queue,
+        queue_name=None if settings.service_bus_uses_topic else settings.service_bus_queue,
+        topic_name=settings.service_bus_queue if settings.service_bus_uses_topic else None,
     )
     blob_service = BlobServiceClient(
         account_url=settings.blob_endpoint,

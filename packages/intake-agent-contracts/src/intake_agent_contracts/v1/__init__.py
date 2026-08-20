@@ -2,9 +2,9 @@
 
 from intake_agent_contracts.v1.models import (
     AddReviewCommentRequest,
+    AgentRole,
     ApprovedField,
     ApprovedRequestHandover,
-    AgentRole,
     AuthoritativeTurnContext,
     ConsentChallenge,
     DecideReviewRequest,
@@ -25,9 +25,9 @@ from intake_agent_contracts.v1.models import (
 
 __all__ = [
     "AddReviewCommentRequest",
+    "AgentRole",
     "ApprovedField",
     "ApprovedRequestHandover",
-    "AgentRole",
     "AuthoritativeTurnContext",
     "ConsentChallenge",
     "DecideReviewRequest",

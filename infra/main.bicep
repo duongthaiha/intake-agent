@@ -33,6 +33,15 @@ param costCenter string = 'unassigned'
 @description('Deploy runtime workloads after immutable container images are available.')
 param deployWorkloads bool = false
 
+@description('Deploy asynchronous workers after their immutable image is available.')
+param deployWorkers bool = deployWorkloads
+
+@description('Deploy the evaluation job after its immutable image is available.')
+param deployEvaluation bool = deployWorkloads
+
+@description('Deploy the private one-shot Foundry configuration job.')
+param deployFoundryConfiguration bool = false
+
 @description('Immutable command-service image in the private ACR.')
 param commandServiceImage string = 'runtime-artifact-required'
 
@@ -42,7 +51,33 @@ param workersImage string = 'runtime-artifact-required'
 @description('Immutable evaluation image in the private ACR.')
 param evaluationImage string = 'runtime-artifact-required'
 
-@minValue(400)
+@description('Immutable Foundry configuration image in the private ACR.')
+param foundryConfigurationImage string = 'runtime-artifact-required'
+
+@description('Immutable Foundry Hosted Agent image in the private ACR.')
+param hostedAgentImage string = 'runtime-artifact-required'
+
+@minLength(40)
+@maxLength(40)
+@description('Git commit evaluated by the private evaluation job.')
+param evaluationCommitSha string = '0000000000000000000000000000000000000000'
+
+@description('Confidential Entra client used by Foundry custom OAuth connections.')
+param foundryOAuthClientId string = ''
+
+@description('Microsoft Entra application ID URI accepted by the MCP resource server.')
+param mcpAudience string = 'api://09ff0241-0547-4231-9496-67121269632b'
+
+@description('Delegated OAuth scope required by the MCP resource server.')
+param mcpRequiredScope string = 'access_as_user'
+
+@description('Microsoft Entra client application IDs allowed to call the MCP resource server.')
+param mcpAuthorizedClientIds array = [
+  '04b07795-8ddb-461a-bbee-02f9e1bf7b46'
+  '1fec8e78-bce4-4aaf-ab1b-5451cc387264'
+]
+
+@minValue(1000)
 @description('Autoscale maximum RU/s for the product Cosmos database.')
 param cosmosMaxThroughput int = 4000
 
@@ -76,11 +111,22 @@ resource applicationResourceGroup 'Microsoft.Resources/resourceGroups@2024-11-01
   tags: tags
 }
 
+module routeTable 'modules/route-table.bicep' = {
+  name: 'route-table'
+  scope: applicationResourceGroup
+  params: {
+    location: location
+    suffix: suffix
+    tags: tags
+  }
+}
+
 module network 'modules/network.bicep' = {
   name: 'network'
   scope: applicationResourceGroup
   params: {
     location: location
+    routeTableId: routeTable.outputs.routeTableId
     suffix: suffix
     tags: tags
   }
@@ -102,20 +148,9 @@ module egress 'modules/egress.bicep' = if (hardened) {
   params: {
     firewallSubnetId: network.outputs.firewallSubnetId
     location: location
+    routeTableName: routeTable.outputs.routeTableName
     suffix: suffix
     tags: tags
-  }
-}
-
-module networkRoutes 'modules/network-routes.bicep' = if (hardened) {
-  name: 'controlled-egress-routes'
-  scope: applicationResourceGroup
-  params: {
-    containerAppsNetworkSecurityGroupId: network.outputs.containerAppsNetworkSecurityGroupId
-    foundryNetworkSecurityGroupId: network.outputs.foundryNetworkSecurityGroupId
-    functionsNetworkSecurityGroupId: network.outputs.functionsNetworkSecurityGroupId
-    routeTableId: egress!.outputs.routeTableId
-    virtualNetworkName: network.outputs.virtualNetworkName
   }
 }
 
@@ -158,10 +193,7 @@ module containerEnvironment 'modules/container-environment.bicep' = {
     workspaceSharedKey: observability.outputs.workspaceSharedKey
     zoneRedundant: production
   }
-  dependsOn: [
-    networkRoutes
-    privateEndpoints
-  ]
+  dependsOn: [privateEndpoints]
 }
 
 module foundry 'modules/foundry.bicep' = {
@@ -178,9 +210,6 @@ module foundry 'modules/foundry.bicep' = {
     tags: tags
     workspaceId: observability.outputs.workspaceId
   }
-  dependsOn: [
-    networkRoutes
-  ]
 }
 
 module privateEndpoints 'modules/private-endpoints.bicep' = {
@@ -252,15 +281,29 @@ module compute 'modules/compute.bicep' = {
       applicationInsightsConnectionString: observability.outputs.applicationInsightsConnectionString
       cosmosDatabase: data.outputs.cosmos.databaseName
       cosmosEndpoint: data.outputs.cosmos.endpoint
+      entraTenantId: tenant().tenantId
+      evaluationCommitSha: evaluationCommitSha
+      foundryModelDeployment: foundry.outputs.foundry.modelDeploymentName
+      foundryOAuthClientId: foundryOAuthClientId
       foundryProjectEndpoint: 'https://${foundry.outputs.foundry.accountName}.services.ai.azure.com/api/projects/${foundry.outputs.foundry.projectName}'
+      foundryProjectId: foundry.outputs.foundry.projectId
       keyVaultUri: data.outputs.keyVault.uri
+      mcpAudience: mcpAudience
+      mcpAuthorizedClientIds: mcpAuthorizedClientIds
+      mcpRequiredScope: mcpRequiredScope
       serviceBusNamespace: data.outputs.serviceBus.name
       serviceBusTopic: data.outputs.serviceBus.topicName
       storageAccountName: data.outputs.storage.name
+      storageBlobEndpoint: data.outputs.storage.blobEndpoint
     }
     deployWorkloads: deployWorkloads
+    deployWorkers: deployWorkers
+    deployEvaluation: deployEvaluation
+    deployFoundryConfiguration: deployFoundryConfiguration
     environment: containerEnvironment.outputs.environment
     evaluationImage: evaluationImage
+    foundryConfigurationImage: foundryConfigurationImage
+    hostedAgentImage: hostedAgentImage
     identities: identity.outputs.identities
     location: location
     registry: data.outputs.registry

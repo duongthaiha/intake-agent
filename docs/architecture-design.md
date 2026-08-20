@@ -1254,6 +1254,7 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | ADR-017 | Support Hosted and Prompt Agents as interchangeable adapters over shared behavior and requester/reviewer MCP contracts; require equivalent business outcomes and independent release gates | Accepted; supersedes ADR-002 and completes the extraction begun by ADR-015 |
 | ADR-018 | Separate Teams Activity context, Bot Service channel authorization, agent identity, Toolbox user OAuth, MCP authorization, and command-service data access; never use Activity identifiers as product credentials | Accepted |
 | ADR-019 | Create a dedicated workload-profile Container Apps managed environment per Intake Agent environment; do not reuse a shared or pre-existing managed environment | Accepted |
+| ADR-020 | Run only the Foundry Hosted Agent image with the platform-supported root model because the reserved `/home/session` mount must host Responses session state; keep all product workloads non-root and deny the Hosted identity product data-plane access | Accepted |
 
 ## 22. Risks and mitigations
 

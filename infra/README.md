@@ -4,7 +4,10 @@ This folder contains the subscription-scope Bicep foundation for isolated `dev`,
 
 ## Current deployment status
 
-**Do not deploy this foundation yet.** The command service, worker, evaluation, hosted-agent, prompt-agent, and Toolbox artifacts do not exist on this branch. The infrastructure compiles with `deployWorkloads = false`; `azd deploy` fails closed until immutable image digests and the governed Foundry artifacts are present.
+The hardened development environment and digest-pinned command, worker, evaluation,
+private configurator, Hosted Agent, Prompt Agent, and Toolbox artifacts were deployed
+and validated on 2026-08-20. Test and production remain fail-closed until tenant,
+evaluation, operational, and release approvals are complete.
 
 No secrets are stored in the Bicep parameter files or `azure.yaml`.
 
@@ -58,12 +61,12 @@ Foundry agent network injection is enabled in both modes so its customer-owned S
 | Foundry account, project, connections, capability host | Bicep through `azd provision` | Agent definitions are a later configuration artifact |
 | Container Apps managed environment | Bicep through `azd provision` | Dedicated to Intake Agent |
 | ACR, Cosmos DB, Storage, Search, Service Bus, Key Vault, monitoring | Bicep through `azd provision` | Public data-plane access disabled |
-| Command service | Bicep resource plus `azd` image deployment | Blocked until `COMMAND_SERVICE_IMAGE` is an immutable digest |
-| Outbox, notification, integration, completion, retention workers | Bicep resources plus `azd` image deployment | Container Apps resources optimized for Functions |
-| Evaluation job | Bicep | Blocked until `EVALUATION_IMAGE` is an immutable digest |
-| Hosted Agent | `azure.ai.agents` azd extension | Governed by `foundry/deployables.json`; artifact not present |
-| Prompt Agent | Foundry configuration workflow | Governed by `foundry/deployables.json`; artifact not present |
-| Requester/reviewer Toolboxes and OAuth connections | Foundry configuration plus tenant-governed Entra setup | Separate scopes and allow-lists; artifacts/app registrations not present |
+| Command service | Bicep resource plus `azd` image deployment | Digest-pinned private MCP service |
+| Outbox, notification, integration, completion, retention workers | Bicep resources plus `azd` image deployment | Digest-pinned Container Apps resources optimized for Functions |
+| Evaluation job | Bicep | Digest-pinned; release fails closed while approvals are pending |
+| Hosted Agent | Private managed-identity configuration job | Governed by `foundry/deployables.json`; digest-pinned Responses 2.0 image |
+| Prompt Agent | Private managed-identity configuration job | Immutable requester/reviewer versions |
+| Requester/reviewer Toolboxes and OAuth connections | Private configuration job plus tenant-governed Entra setup | Separate surfaces, connections, and allow-lists |
 | Actual agent instance RBAC | `scripts/azure/post-publish-rbac.ps1` | Runs only after deployment returns the real instance identities |
 | Teams publication/catalog approval | Foundry publication and Microsoft 365 administration | Not represented as an invented ARM resource |
 

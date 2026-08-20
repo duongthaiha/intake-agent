@@ -51,8 +51,8 @@ def build_responses_host(
     correlation_id_factory: Callable[[], str] | None = None,
 ) -> ResponsesHostServer:
     """Compose the current Foundry Responses 2.0 host without owning credentials."""
-    from agent_framework.foundry import (
-        FoundryChatClient,
+    from agent_framework.foundry import FoundryChatClient
+    from agent_framework_foundry_hosting import (  # type: ignore[import-not-found]
         FoundryToolbox,
         ResponsesHostServer,
     )

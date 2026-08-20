@@ -23,6 +23,15 @@
     "deployWorkloads": {
       "value": "${AZURE_DEPLOY_WORKLOADS=false}"
     },
+    "deployWorkers": {
+      "value": "${AZURE_DEPLOY_WORKERS=false}"
+    },
+    "deployEvaluation": {
+      "value": "${AZURE_DEPLOY_EVALUATION=false}"
+    },
+    "deployFoundryConfiguration": {
+      "value": "${AZURE_DEPLOY_FOUNDRY_CONFIGURATION=false}"
+    },
     "commandServiceImage": {
       "value": "${COMMAND_SERVICE_IMAGE=runtime-artifact-required}"
     },
@@ -31,6 +40,18 @@
     },
     "evaluationImage": {
       "value": "${EVALUATION_IMAGE=runtime-artifact-required}"
+    },
+    "foundryConfigurationImage": {
+      "value": "${FOUNDRY_CONFIGURATION_IMAGE=runtime-artifact-required}"
+    },
+    "hostedAgentImage": {
+      "value": "${HOSTED_AGENT_IMAGE=runtime-artifact-required}"
+    },
+    "evaluationCommitSha": {
+      "value": "${EVALUATION_COMMIT_SHA=0000000000000000000000000000000000000000}"
+    },
+    "foundryOAuthClientId": {
+      "value": "${FOUNDRY_OAUTH_CLIENT_ID=}"
     }
   }
 }

@@ -10,6 +10,9 @@ param tags object
 @description('Dedicated AzureFirewallSubnet resource ID.')
 param firewallSubnetId string
 
+@description('Pre-created workload route table name.')
+param routeTableName string
+
 @description('Source address range permitted to use the firewall.')
 param sourceAddressPrefix string = '10.42.0.0/16'
 
@@ -20,8 +23,11 @@ param allowedFqdns array = [
   replace(replace(environment().resourceManager, 'https://', ''), '/', '')
   'mcr.microsoft.com'
   '*.data.mcr.microsoft.com'
+  'packages.aks.azure.com'
+  'acs-mirror.azureedge.net'
   '*.azurecr.io'
   '*.data.azurecr.io'
+  '*.identity.azure.net'
   '*.applicationinsights.azure.com'
   '*.monitor.azure.com'
   '*.services.ai.azure.com'
@@ -131,22 +137,17 @@ resource firewall 'Microsoft.Network/azureFirewalls@2024-07-01' = {
   ]
 }
 
-resource workloadRouteTable 'Microsoft.Network/routeTables@2024-07-01' = {
-  name: 'rt-intake-egress-${suffix}'
-  location: location
-  tags: tags
+resource workloadRouteTable 'Microsoft.Network/routeTables@2024-07-01' existing = {
+  name: routeTableName
+}
+
+resource defaultRoute 'Microsoft.Network/routeTables/routes@2024-07-01' = {
+  parent: workloadRouteTable
+  name: 'default-via-firewall'
   properties: {
-    disableBgpRoutePropagation: false
-    routes: [
-      {
-        name: 'default-via-firewall'
-        properties: {
-          addressPrefix: '0.0.0.0/0'
-          nextHopType: 'VirtualAppliance'
-          nextHopIpAddress: firewall.properties.ipConfigurations[0].properties.privateIPAddress
-        }
-      }
-    ]
+    addressPrefix: '0.0.0.0/0'
+    nextHopType: 'VirtualAppliance'
+    nextHopIpAddress: firewall.properties.ipConfigurations[0].properties.privateIPAddress
   }
 }
 

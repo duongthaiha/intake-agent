@@ -385,18 +385,22 @@ resource domainEvents 'Microsoft.ServiceBus/namespaces/topics@2026-01-01' = {
 var subscriptionDefinitions = [
   {
     name: 'notifications'
+    eventType: 'NotificationRequested'
     maxDeliveryCount: 10
   }
   {
     name: 'integrations'
+    eventType: 'DeliveryRequested'
     maxDeliveryCount: 10
   }
   {
     name: 'completion'
+    eventType: 'DeliveryCompleted'
     maxDeliveryCount: 10
   }
   {
     name: 'retention'
+    eventType: 'RetentionRequested'
     maxDeliveryCount: 5
   }
 ]
@@ -413,6 +417,20 @@ resource subscriptions 'Microsoft.ServiceBus/namespaces/topics/subscriptions@202
       lockDuration: 'PT1M'
       maxDeliveryCount: subscriptionDefinition.maxDeliveryCount
       status: 'Active'
+    }
+  }
+]
+
+resource subscriptionRules 'Microsoft.ServiceBus/namespaces/topics/subscriptions/rules@2026-01-01' = [
+  for (subscriptionDefinition, index) in subscriptionDefinitions: {
+    parent: subscriptions[index]
+    name: 'event-type-filter'
+    properties: {
+      filterType: 'SqlFilter'
+      sqlFilter: {
+        compatibilityLevel: 20
+        sqlExpression: 'event_type = \'${subscriptionDefinition.eventType}\''
+      }
     }
   }
 ]
@@ -457,9 +475,16 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-04-01' = {
     anonymousPullEnabled: false
     dataEndpointEnabled: true
     networkRuleBypassOptions: 'AzureServices'
+    networkRuleSet: {
+      defaultAction: 'Deny'
+      ipRules: []
+    }
     publicNetworkAccess: 'Disabled'
     zoneRedundancy: zoneRedundant ? 'Enabled' : 'Disabled'
     policies: {
+      azureADAuthenticationAsArmPolicy: {
+        status: 'enabled'
+      }
       exportPolicy: {
         status: 'disabled'
       }

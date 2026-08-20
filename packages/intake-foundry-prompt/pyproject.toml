@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "azure-ai-projects>=2.3.0",
+    "azure-identity>=1.25.1",
     "intake-agent-behavior",
     "intake-agent-contracts",
+    "requests>=2.32.5,<3",
 ]
 
 [build-system]
