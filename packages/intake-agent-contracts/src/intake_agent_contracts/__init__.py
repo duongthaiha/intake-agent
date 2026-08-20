@@ -1,0 +1,50 @@
+"""Versioned, agent-neutral Intake Agent contracts."""
+
+from intake_agent_contracts.v1 import (
+    AddReviewCommentRequest,
+    AgentRole,
+    ApprovedField,
+    ApprovedRequestHandover,
+    AuthoritativeTurnContext,
+    ConsentChallenge,
+    DecideReviewRequest,
+    DownstreamAcceptance,
+    ErrorCode,
+    ErrorDetail,
+    GetIntakeContextRequest,
+    GetReviewContextRequest,
+    ListAssignedReviewsRequest,
+    ListMyRequestsRequest,
+    RequestChangesRequest,
+    ResumeDirective,
+    SubmitIntakeRequest,
+    ToolResponse,
+    TurnProvenance,
+    UpdateFieldRequest,
+)
+
+CONTRACT_VERSION = "1.0"
+
+__all__ = [
+    "CONTRACT_VERSION",
+    "AddReviewCommentRequest",
+    "AgentRole",
+    "ApprovedField",
+    "ApprovedRequestHandover",
+    "AuthoritativeTurnContext",
+    "ConsentChallenge",
+    "DecideReviewRequest",
+    "DownstreamAcceptance",
+    "ErrorCode",
+    "ErrorDetail",
+    "GetIntakeContextRequest",
+    "GetReviewContextRequest",
+    "ListAssignedReviewsRequest",
+    "ListMyRequestsRequest",
+    "RequestChangesRequest",
+    "ResumeDirective",
+    "SubmitIntakeRequest",
+    "ToolResponse",
+    "TurnProvenance",
+    "UpdateFieldRequest",
+]

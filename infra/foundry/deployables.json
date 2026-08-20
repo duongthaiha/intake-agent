@@ -1,0 +1,35 @@
+{
+  "$schema": "./deployables.schema.json",
+  "version": "1.0",
+  "projectEnvironmentVariable": "AZURE_FOUNDRY_PROJECT_ID",
+  "deployables": [
+    {
+      "name": "hosted-agent",
+      "kind": "hosted-agent",
+      "artifactPath": "foundry/hosted",
+      "provisioner": "azure.ai.agents azd extension",
+      "required": true
+    },
+    {
+      "name": "prompt-agent",
+      "kind": "prompt-agent",
+      "artifactPath": "packages/intake-foundry-prompt/src/intake_foundry_prompt/prompt-agents.json",
+      "provisioner": "Microsoft Foundry configuration",
+      "required": true
+    },
+    {
+      "name": "requester-toolbox",
+      "kind": "toolbox",
+      "artifactPath": "foundry/toolboxes/requester-toolbox.yaml",
+      "provisioner": "Microsoft Foundry Toolbox",
+      "required": true
+    },
+    {
+      "name": "reviewer-toolbox",
+      "kind": "toolbox",
+      "artifactPath": "foundry/toolboxes/reviewer-toolbox.yaml",
+      "provisioner": "Microsoft Foundry Toolbox",
+      "required": true
+    }
+  ]
+}

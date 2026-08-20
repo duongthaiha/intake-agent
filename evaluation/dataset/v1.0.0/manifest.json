@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "intake-agent-release-benchmark",
+  "dataset_version": "1.0.0",
+  "classification": "synthetic-confidential",
+  "release_set": true,
+  "development_use_prohibited": true,
+  "production_data": false,
+  "supported_languages": [
+    "en",
+    "fr"
+  ],
+  "case_file": "cases.jsonl",
+  "case_count": 14,
+  "approval": {
+    "status": "pending_domain_review",
+    "required_roles": [
+      "product-owner",
+      "quality-owner",
+      "security-owner"
+    ],
+    "approved_by": [],
+    "approved_at": null
+  },
+  "change_history": [
+    {
+      "version": "1.0.0",
+      "date": "2026-08-20",
+      "summary": "Initial synthetic release benchmark covering functional, resilience, security, variant-parity, and authorization behavior."
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "agents": [
+    {
+      "agentName": "intake-requester-prompt",
+      "description": "Guides a requester using only authoritative Intake Agent tools.",
+      "role": "requester",
+      "toolboxName": "intake-requester",
+      "toolboxConnectionName": "intake-requester-toolbox-agent-identity",
+      "serverLabel": "intake-requester",
+      "requiredGatewayCapabilities": [
+        "reload-context-before-turn",
+        "allowed-actions-gate",
+        "trusted-provenance-and-correlation",
+        "no-automatic-mutation-replay"
+      ]
+    },
+    {
+      "agentName": "intake-reviewer-prompt",
+      "description": "Guides an assigned reviewer using only authoritative Intake Agent tools.",
+      "role": "reviewer",
+      "toolboxName": "intake-reviewer",
+      "toolboxConnectionName": "intake-reviewer-toolbox-agent-identity",
+      "serverLabel": "intake-reviewer",
+      "requiredGatewayCapabilities": [
+        "reload-context-before-turn",
+        "allowed-actions-gate",
+        "trusted-provenance-and-correlation",
+        "no-automatic-mutation-replay"
+      ]
+    }
+  ]
+}

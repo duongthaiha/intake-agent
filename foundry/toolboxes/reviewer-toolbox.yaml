@@ -1,0 +1,3 @@
+description: Intake Agent reviewer tools through the private MCP connection
+connections:
+  - name: intake-reviewer-mcp

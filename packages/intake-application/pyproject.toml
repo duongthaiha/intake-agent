@@ -1,0 +1,13 @@
+[project]
+name = "intake-application"
+version = "0.1.0"
+description = "Application command/query handlers for Intake Agent"
+requires-python = ">=3.12,<3.15"
+dependencies = ["intake-domain"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+intake-domain = { workspace = true }

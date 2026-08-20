@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION=eastus2}"
+    },
+    "searchLocation": {
+      "value": "${AZURE_SEARCH_LOCATION=eastus2}"
+    },
+    "networkMode": {
+      "value": "${AZURE_NETWORK_MODE=hardened}"
+    },
+    "owner": {
+      "value": "${AZURE_OWNER=intake-agent-team}"
+    },
+    "costCenter": {
+      "value": "${AZURE_COST_CENTER=unassigned}"
+    },
+    "deployWorkloads": {
+      "value": "${AZURE_DEPLOY_WORKLOADS=false}"
+    },
+    "deployWorkers": {
+      "value": "${AZURE_DEPLOY_WORKERS=false}"
+    },
+    "deployEvaluation": {
+      "value": "${AZURE_DEPLOY_EVALUATION=false}"
+    },
+    "deployFoundryConfiguration": {
+      "value": "${AZURE_DEPLOY_FOUNDRY_CONFIGURATION=false}"
+    },
+    "commandServiceImage": {
+      "value": "${COMMAND_SERVICE_IMAGE=runtime-artifact-required}"
+    },
+    "workersImage": {
+      "value": "${WORKERS_IMAGE=runtime-artifact-required}"
+    },
+    "evaluationImage": {
+      "value": "${EVALUATION_IMAGE=runtime-artifact-required}"
+    },
+    "foundryConfigurationImage": {
+      "value": "${FOUNDRY_CONFIGURATION_IMAGE=runtime-artifact-required}"
+    },
+    "hostedAgentImage": {
+      "value": "${HOSTED_AGENT_IMAGE=runtime-artifact-required}"
+    },
+    "evaluationCommitSha": {
+      "value": "${EVALUATION_COMMIT_SHA=0000000000000000000000000000000000000000}"
+    },
+    "foundryOAuthClientId": {
+      "value": "${FOUNDRY_OAUTH_CLIENT_ID=}"
+    }
+  }
+}

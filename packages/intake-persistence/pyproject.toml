@@ -1,0 +1,19 @@
+[project]
+name = "intake-persistence"
+version = "0.1.0"
+description = "Persistence adapters for Intake Agent deterministic ports"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "azure-cosmos",
+    "azure-identity",
+    "azure-servicebus",
+    "azure-storage-blob",
+    "intake-domain",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+intake-domain = { workspace = true }

@@ -10,7 +10,7 @@ The central design rule is:
 
 > The language model may interpret and propose, but deterministic code authorizes, validates, persists, and changes state.
 
-Each agent variant interprets conversation, asks clarifying questions, and presents results, but neither owns authoritative state or business decisions. Teams identity metadata, Bot Service channel authentication, agent identity, Toolbox authentication, user-delegated MCP authorization, and command-service data access remain separate trust boundaries. Both variants use versioned requester and reviewer Toolbox configurations; the agent authenticates to Toolbox with its own identity, while each OAuth connection obtains a user credential through explicit consent before calling the private streamable-HTTP MCP endpoint. The shared Intake Command Service runs in the existing Container Apps managed environment and composes deterministic application/domain packages with Azure persistence adapters. Requester and reviewer contracts have separate scopes and tool allow-lists; worker commands remain private. Azure Cosmos DB stores request data, Azure Blob Storage stores evaluation datasets and evidence, Azure Service Bus decouples background work, and Azure Functions process notifications, retention, completion, and downstream deliveries.
+Each agent variant interprets conversation, asks clarifying questions, and presents results, but neither owns authoritative state or business decisions. Teams identity metadata, Bot Service channel authentication, agent identity, Toolbox authentication, user-delegated MCP authorization, and command-service data access remain separate trust boundaries. Both variants use versioned requester and reviewer Toolbox configurations; the agent authenticates to Toolbox with its own identity, while each OAuth connection obtains a user credential through explicit consent before calling the private streamable-HTTP MCP endpoint. The shared Intake Command Service runs in a dedicated Intake Agent Container Apps managed environment and composes deterministic application/domain packages with Azure persistence adapters. Requester and reviewer contracts have separate scopes and tool allow-lists; worker commands remain private. Azure Cosmos DB stores request data, Azure Blob Storage stores evaluation datasets and evidence, Azure Service Bus decouples background work, and Azure Functions process notifications, retention, completion, and downstream deliveries.
 
 ## 2. Scope
 
@@ -899,6 +899,8 @@ Entra groups or app roles provide coarse roles. The Intake Command Service combi
 
 Development, test, and production use separate Foundry projects and separate application/data resources. Production should use a separate subscription where enterprise policy requires a stronger trust boundary.
 
+Each environment also receives a dedicated workload-profile Container Apps managed environment in the Intake Agent VNet. It is not shared with unrelated applications. The dedicated environment provides an explicit network, identity, scaling, diagnostics, and lifecycle boundary for the private command service, containerized Functions workers, and evaluation job.
+
 Resource naming, tags, diagnostics, Azure RBAC, budgets, locks, and policies are
 deployed with Bicep. GitHub Actions uses workload identity federation. Entra
 application registrations, delegated scopes, redirect URIs, preauthorization,
@@ -929,7 +931,7 @@ flowchart TB
     end
 
     subgraph VNet["Application virtual network"]
-        subgraph ACA["Existing Container Apps managed environment"]
+        subgraph ACA["Dedicated Intake Agent Container Apps managed environment"]
             CommandService["Intake Command Service<br/><small>[Container instance: private ingress]</small>"]
         end
         subgraph Functions["Functions integration subnets"]
@@ -975,7 +977,7 @@ flowchart TB
             RequesterTools["Requester Toolbox<br/><small>[Deployed configuration]</small>"]
             ReviewerTools["Reviewer Toolbox<br/><small>[Deployed configuration]</small>"]
         end
-        subgraph ACA["Existing Container Apps managed environment"]
+        subgraph ACA["Dedicated Intake Agent Container Apps managed environment"]
             CommandService["Intake Command Service<br/><small>[Container instance: private ingress]</small>"]
         end
         subgraph FunctionSubnet["Functions integration subnets"]
@@ -1251,6 +1253,8 @@ Risky changes use staged rollout or a feature flag. Production never automatical
 | ADR-016 | Expose reviewer actions through a separate versioned Toolbox/MCP contract and delegated scope on the shared command-service runtime | Accepted |
 | ADR-017 | Support Hosted and Prompt Agents as interchangeable adapters over shared behavior and requester/reviewer MCP contracts; require equivalent business outcomes and independent release gates | Accepted; supersedes ADR-002 and completes the extraction begun by ADR-015 |
 | ADR-018 | Separate Teams Activity context, Bot Service channel authorization, agent identity, Toolbox user OAuth, MCP authorization, and command-service data access; never use Activity identifiers as product credentials | Accepted |
+| ADR-019 | Create a dedicated workload-profile Container Apps managed environment per Intake Agent environment; do not reuse a shared or pre-existing managed environment | Accepted |
+| ADR-020 | Run only the Foundry Hosted Agent image with the platform-supported root model because the reserved `/home/session` mount must host Responses session state; keep all product workloads non-root and deny the Hosted identity product data-plane access | Accepted |
 
 ## 22. Risks and mitigations
 

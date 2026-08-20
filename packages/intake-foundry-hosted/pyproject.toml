@@ -1,0 +1,25 @@
+[project]
+name = "intake-foundry-hosted"
+version = "0.1.0"
+description = "Microsoft Agent Framework Hosted Agent adapter for Intake Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "agent-framework-foundry",
+    "intake-agent-behavior",
+    "intake-agent-contracts",
+]
+
+[project.optional-dependencies]
+runtime = ["agent-framework-foundry-hosting>=1.0.0b260730"]
+
+[project.scripts]
+intake-foundry-smoke = "intake_foundry_hosted.smoke:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+intake-agent-contracts = { workspace = true }
+intake-agent-behavior = { workspace = true }

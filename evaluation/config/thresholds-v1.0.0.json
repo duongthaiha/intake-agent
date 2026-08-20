@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0.0",
+  "threshold_set_version": "1.0.0",
+  "baseline_status": "pending_owner_approval",
+  "variants": [
+    "hosted",
+    "prompt"
+  ],
+  "required_metrics": {
+    "field_capture_accuracy": {
+      "direction": "minimum",
+      "value": 0.85
+    },
+    "required_gap_recall": {
+      "direction": "minimum",
+      "value": 0.9
+    },
+    "false_positive_gap_rate": {
+      "direction": "maximum",
+      "value": 0.2
+    },
+    "contradiction_precision": {
+      "direction": "minimum",
+      "value": 0.8
+    },
+    "contradiction_recall": {
+      "direction": "minimum",
+      "value": 0.9
+    },
+    "clarification_relevance": {
+      "direction": "minimum",
+      "value": 0.8
+    },
+    "clarification_repetition_rate": {
+      "direction": "maximum",
+      "value": 0.1
+    },
+    "groundedness": {
+      "direction": "minimum",
+      "value": 0.95
+    },
+    "completion_rate": {
+      "direction": "minimum",
+      "value": 0.9
+    },
+    "reviewer_acceptance": {
+      "direction": "minimum",
+      "value": 0.8
+    }
+  },
+  "differential_metrics": {
+    "field_agreement": {
+      "direction": "minimum",
+      "value": 0.95
+    },
+    "gap_agreement": {
+      "direction": "minimum",
+      "value": 0.95
+    },
+    "contradiction_agreement": {
+      "direction": "minimum",
+      "value": 0.95
+    },
+    "question_intent_agreement": {
+      "direction": "minimum",
+      "value": 0.9
+    },
+    "outcome_agreement": {
+      "direction": "minimum",
+      "value": 1.0
+    }
+  }
+}

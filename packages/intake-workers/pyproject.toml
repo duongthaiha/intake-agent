@@ -1,0 +1,22 @@
+[project]
+name = "intake-workers"
+version = "0.1.0"
+description = "Service-only workers and Azure Functions hosts for Intake Agent"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+    "azure-functions>=1.25.0,<2",
+    "intake-agent-contracts",
+    "intake-application",
+    "intake-domain",
+    "intake-persistence",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+intake-agent-contracts = { workspace = true }
+intake-application = { workspace = true }
+intake-domain = { workspace = true }
+intake-persistence = { workspace = true }

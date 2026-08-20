@@ -1,0 +1,25 @@
+[project]
+name = "intake-foundry-prompt"
+version = "0.1.0"
+description = "Version-controlled Microsoft Foundry Prompt Agent definitions for Intake Agent"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "azure-ai-projects>=2.3.0",
+    "azure-identity>=1.25.1",
+    "intake-agent-behavior",
+    "intake-agent-contracts",
+    "requests>=2.32.5,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+source-include = ["src/intake_foundry_prompt/prompt-agents.json"]
+
+[tool.uv.sources]
+intake-agent-contracts = { workspace = true }
+intake-agent-behavior = { workspace = true }
