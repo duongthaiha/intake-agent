@@ -45,9 +45,6 @@ resource account 'Microsoft.CognitiveServices/accounts@2026-05-01' = {
           'graph.microsoft.com'
           replace(replace(environment().authentication.loginEndpoint, 'https://', ''), '/', '')
           replace(replace(environment().resourceManager, 'https://', ''), '/', '')
-          '*.applicationinsights.azure.com'
-          '*.monitor.azure.com'
-          '*.teams.microsoft.com'
         ]
       : []
     allowProjectManagement: true

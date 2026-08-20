@@ -1,6 +1,9 @@
 @description('Azure region for data and messaging resources.')
 param location string
 
+@description('Azure region for the Search service.')
+param searchLocation string = location
+
 @description('Short, globally consistent resource-name suffix.')
 param suffix string
 
@@ -317,7 +320,7 @@ resource sqlContainers 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
 
 resource search 'Microsoft.Search/searchServices@2025-05-01' = {
   name: searchName
-  location: location
+  location: searchLocation
   tags: tags
   sku: {
     name: 'standard'
@@ -326,11 +329,6 @@ resource search 'Microsoft.Search/searchServices@2025-05-01' = {
     type: 'SystemAssigned'
   }
   properties: {
-    authOptions: {
-      aadOrApiKey: {
-        aadAuthFailureMode: 'http401WithBearerChallenge'
-      }
-    }
     disableLocalAuth: true
     encryptionWithCmk: {
       enforcement: 'Unspecified'

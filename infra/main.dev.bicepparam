@@ -2,6 +2,7 @@ using './main.bicep'
 
 param environmentName = 'dev'
 param location = 'eastus2'
+param searchLocation = 'eastus'
 param networkMode = 'hardened'
 param owner = 'intake-agent-team'
 param costCenter = 'unassigned'

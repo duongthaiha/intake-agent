@@ -16,31 +16,43 @@ services:
   command-service:
     host: containerapp
     image: ${COMMAND_SERVICE_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_COMMAND_SERVICE_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
   outbox-worker:
     host: containerapp
     image: ${WORKERS_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_OUTBOX_WORKER_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
   notification-worker:
     host: containerapp
     image: ${WORKERS_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_NOTIFICATION_WORKER_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
   integration-worker:
     host: containerapp
     image: ${WORKERS_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_INTEGRATION_WORKER_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
   completion-worker:
     host: containerapp
     image: ${WORKERS_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_COMPLETION_WORKER_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
   retention-worker:
     host: containerapp
     image: ${WORKERS_IMAGE}
+    docker:
+      remoteBuild: true
     resourceName: ${AZURE_RETENTION_WORKER_NAME}
     resourceGroup: ${AZURE_RESOURCE_GROUP}
 x-runtimeMappings:

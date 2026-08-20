@@ -11,6 +11,9 @@ param environmentName string
 @description('Primary Azure region. eastus2 is the current candidate and must be revalidated before provisioning.')
 param location string = 'eastus2'
 
+@description('Azure AI Search region. Override when the primary region has no Search capacity.')
+param searchLocation string = location
+
 @description('Foundry ingress topology. Customer data services remain private in both modes.')
 @allowed([
   'baseline'
@@ -134,6 +137,7 @@ module data 'modules/data.bicep' = {
   params: {
     cosmosMaxThroughput: cosmosMaxThroughput
     location: location
+    searchLocation: searchLocation
     suffix: suffix
     tags: tags
     workspaceId: observability.outputs.workspaceId
