@@ -50,9 +50,17 @@ def test_shared_behavior_declares_bounded_surfaces() -> None:
 def test_internal_import_boundaries() -> None:
     allowed = {
         "intake_agent_contracts": set(),
-        "intake_agent_behavior": set(),
+        "intake_agent_behavior": {"intake_agent_contracts"},
         "intake_domain": set(),
         "intake_application": {"intake_domain"},
+        "intake_foundry_hosted": {
+            "intake_agent_behavior",
+            "intake_agent_contracts",
+        },
+        "intake_foundry_prompt": {
+            "intake_agent_behavior",
+            "intake_agent_contracts",
+        },
         "intake_persistence": {"intake_domain"},
         "intake_workers": {
             "intake_agent_contracts",
@@ -93,6 +101,58 @@ def test_default_azure_credential_is_limited_to_composition_roots() -> None:
         if "DefaultAzureCredential" in source.read_text(encoding="utf-8"):
             matches.append(source.relative_to(ROOT).as_posix())
     assert matches == ["packages/intake-persistence/src/intake_persistence/composition.py"]
+
+
+def test_foundry_variants_do_not_import_forbidden_implementations() -> None:
+    forbidden_modules = {
+        "azure.cosmos",
+        "azure.identity",
+        "azure.search",
+        "azure.servicebus",
+        "azure.storage",
+        "intake_application",
+        "intake_domain",
+        "intake_mcp",
+        "intake_persistence",
+    }
+    forbidden_credentials = {
+        "AzureCliCredential",
+        "ClientSecretCredential",
+        "DefaultAzureCredential",
+        "ManagedIdentityCredential",
+        "WorkloadIdentityCredential",
+    }
+    violations: list[str] = []
+    for package_name in ("intake-foundry-hosted", "intake-foundry-prompt"):
+        package_root = ROOT / "packages" / package_name / "src"
+        for source in package_root.rglob("*.py"):
+            tree = ast.parse(source.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if any(
+                            alias.name == forbidden
+                            or alias.name.startswith(f"{forbidden}.")
+                            for forbidden in forbidden_modules
+                        ):
+                            violations.append(
+                                f"{source.relative_to(ROOT)} imports forbidden {alias.name}"
+                            )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    if any(
+                        node.module == forbidden
+                        or node.module.startswith(f"{forbidden}.")
+                        for forbidden in forbidden_modules
+                    ):
+                        violations.append(
+                            f"{source.relative_to(ROOT)} imports forbidden {node.module}"
+                        )
+                    for alias in node.names:
+                        if alias.name in forbidden_credentials:
+                            violations.append(
+                                f"{source.relative_to(ROOT)} imports credential {alias.name}"
+                            )
+    assert violations == []
 
 
 def _check_import(

@@ -8,9 +8,11 @@ dependencies = [
     "intake-application",
     "intake-domain",
     "intake-persistence",
-    "mcp>=2.0.0,<3",
     "pyjwt[crypto]",
 ]
+
+[project.optional-dependencies]
+server = ["mcp>=2.0.0,<3"]
 
 [project.scripts]
 intake-local = "intake_mcp.server:main"

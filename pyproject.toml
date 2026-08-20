@@ -8,7 +8,9 @@ dependencies = [
     "intake-agent-contracts",
     "intake-application",
     "intake-domain",
-    "intake-mcp",
+    "intake-foundry-hosted",
+    "intake-foundry-prompt",
+    "intake-mcp[server]",
     "intake-persistence",
     "intake-workers",
 ]
@@ -23,6 +25,12 @@ dev = [
 
 [tool.uv]
 package = false
+conflicts = [
+    [
+        { package = "intake-foundry-hosted", extra = "runtime" },
+        { package = "intake-mcp", extra = "server" },
+    ],
+]
 
 [tool.uv.sources]
 intake-agent-behavior = { workspace = true }
@@ -32,6 +40,8 @@ intake-domain = { workspace = true }
 intake-mcp = { workspace = true }
 intake-persistence = { workspace = true }
 intake-workers = { workspace = true }
+intake-foundry-hosted = { workspace = true }
+intake-foundry-prompt = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -54,6 +64,8 @@ packages = [
     "intake_mcp",
     "intake_persistence",
     "intake_workers",
+    "intake_foundry_hosted",
+    "intake_foundry_prompt",
 ]
 
 [tool.pytest.ini_options]

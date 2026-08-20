@@ -1,0 +1,17 @@
+kind: hosted
+name: intake-agent-hosted
+protocols:
+  - protocol: responses
+    version: 2.0.0
+resources:
+  cpu: "0.25"
+  memory: 0.5Gi
+environment_variables:
+  - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+    value: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+  - name: INTAKE_AGENT_ROLE
+    value: ${INTAKE_AGENT_ROLE}
+  - name: INTAKE_REQUESTER_TOOLBOX_ENDPOINT
+    value: ${INTAKE_REQUESTER_TOOLBOX_ENDPOINT}
+  - name: INTAKE_REVIEWER_TOOLBOX_ENDPOINT
+    value: ${INTAKE_REVIEWER_TOOLBOX_ENDPOINT}

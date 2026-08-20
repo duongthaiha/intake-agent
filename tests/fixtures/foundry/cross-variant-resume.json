@@ -1,0 +1,18 @@
+[
+  {
+    "variant": "hosted",
+    "conversationKey": "conversation-hosted",
+    "correlationId": "correlation-hosted",
+    "previousResponseId": "response-before-consent",
+    "serverLabel": "intake-requester",
+    "consentUrl": "https://login.example.com/hosted-consent"
+  },
+  {
+    "variant": "prompt",
+    "conversationKey": "conversation-prompt",
+    "correlationId": "correlation-prompt",
+    "conversationId": "foundry-conversation",
+    "serverLabel": "intake-requester",
+    "consentUrl": "https://login.example.com/prompt-consent"
+  }
+]

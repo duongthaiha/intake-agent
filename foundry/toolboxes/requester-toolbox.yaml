@@ -1,0 +1,6 @@
+description: Intake Agent requester tools through the private MCP connection
+tools:
+  - type: mcp
+    server_label: intake-requester
+    project_connection_id: intake-requester-mcp
+    require_approval: "never"

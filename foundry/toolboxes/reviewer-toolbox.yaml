@@ -1,0 +1,6 @@
+description: Intake Agent reviewer tools through the private MCP connection
+tools:
+  - type: mcp
+    server_label: intake-reviewer
+    project_connection_id: intake-reviewer-mcp
+    require_approval: "never"

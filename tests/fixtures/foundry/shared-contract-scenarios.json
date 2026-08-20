@@ -1,0 +1,27 @@
+[
+  {
+    "name": "capture-incomplete-request",
+    "requestId": "request-capture",
+    "requestRevision": 2,
+    "allowedActions": [
+      "update_intake_field",
+      "list_my_intake_requests"
+    ],
+    "gaps": [
+      {
+        "fieldPath": "business_need",
+        "category": "missing"
+      }
+    ]
+  },
+  {
+    "name": "submit-complete-request",
+    "requestId": "request-submit",
+    "requestRevision": 7,
+    "allowedActions": [
+      "submit_intake_for_review",
+      "list_my_intake_requests"
+    ],
+    "gaps": []
+  }
+]

@@ -42,6 +42,44 @@ class ToolResponse(ContractModel):
     error: ErrorDetail | None = None
 
 
+class AgentRole(StrEnum):
+    REQUESTER = "requester"
+    REVIEWER = "reviewer"
+
+
+class TurnProvenance(ContractModel):
+    conversation_key: str = Field(alias="conversationKey", min_length=1, max_length=200)
+    correlation_id: str = Field(alias="correlationId", min_length=1, max_length=200)
+    source_reference: str = Field(alias="sourceReference", min_length=1, max_length=500)
+
+
+class AuthoritativeTurnContext(ContractModel):
+    role: AgentRole
+    request_id: str = Field(alias="requestId", min_length=1, max_length=100)
+    request_revision: int = Field(alias="requestRevision", ge=0)
+    allowed_actions: tuple[str, ...] = Field(alias="allowedActions")
+    payload: dict[str, Any]
+    provenance: TurnProvenance
+
+
+class ConsentChallenge(ContractModel):
+    server_label: str = Field(alias="serverLabel", min_length=1, max_length=100)
+    consent_url: str = Field(alias="consentUrl", pattern=r"^https://")
+
+
+class ResumeDirective(ContractModel):
+    conversation_key: str = Field(alias="conversationKey", min_length=1, max_length=200)
+    correlation_id: str = Field(alias="correlationId", min_length=1, max_length=200)
+    previous_response_id: str | None = Field(
+        default=None, alias="previousResponseId", min_length=1, max_length=200
+    )
+    conversation_id: str | None = Field(
+        default=None, alias="conversationId", min_length=1, max_length=200
+    )
+    consent_challenges: tuple[ConsentChallenge, ...] = Field(alias="consentChallenges")
+    retry_original_turn: Literal[True] = Field(default=True, alias="retryOriginalTurn")
+
+
 class GetIntakeContextRequest(ContractModel):
     conversation_key: str = Field(alias="conversationKey", min_length=1, max_length=200)
     template_id: str = Field(
