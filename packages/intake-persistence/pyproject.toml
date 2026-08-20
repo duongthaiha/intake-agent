@@ -1,0 +1,14 @@
+[project]
+name = "intake-persistence"
+version = "0.1.0"
+description = "Persistence adapters for Intake Agent deterministic ports"
+requires-python = ">=3.12"
+dependencies = ["intake-domain"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+intake-domain = { workspace = true }
+

@@ -1,0 +1,25 @@
+[project]
+name = "intake-mcp"
+version = "0.1.0"
+description = "Local FastMCP surface and composition root for Intake Agent"
+requires-python = ">=3.12"
+dependencies = [
+    "intake-agent-contracts",
+    "intake-application",
+    "intake-domain",
+    "intake-persistence",
+    "mcp>=2.0.0,<3",
+]
+
+[project.scripts]
+intake-local = "intake_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+intake-agent-contracts = { workspace = true }
+intake-application = { workspace = true }
+intake-domain = { workspace = true }
+intake-persistence = { workspace = true }

@@ -1,0 +1,60 @@
+[project]
+name = "intake-agent-foundation"
+version = "0.1.0"
+description = "Deterministic foundation and local profile for the Intake Agent MVP"
+requires-python = ">=3.12"
+dependencies = [
+    "intake-agent-behavior",
+    "intake-agent-contracts",
+    "intake-application",
+    "intake-domain",
+    "intake-mcp",
+    "intake-persistence",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.0",
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.1.0",
+    "ruff>=0.12.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+intake-agent-behavior = { workspace = true }
+intake-agent-contracts = { workspace = true }
+intake-application = { workspace = true }
+intake-domain = { workspace = true }
+intake-mcp = { workspace = true }
+intake-persistence = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = [
+    "intake_agent_behavior",
+    "intake_agent_contracts",
+    "intake_application",
+    "intake_domain",
+    "intake_mcp",
+    "intake_persistence",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+

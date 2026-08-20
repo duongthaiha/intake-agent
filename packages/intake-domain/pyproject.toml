@@ -1,0 +1,11 @@
+[project]
+name = "intake-domain"
+version = "0.1.0"
+description = "Deterministic Intake Agent domain model and policies"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
