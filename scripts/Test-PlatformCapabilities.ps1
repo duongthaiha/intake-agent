@@ -114,7 +114,8 @@ if ($LASTEXITCODE -ne 0) {
 $requiredAzdExtensions = @(
     "azure.ai.agents",
     "azure.ai.connections",
-    "azure.ai.projects"
+    "azure.ai.projects",
+    "azure.ai.toolboxes"
 )
 
 $extensionResults = foreach ($extension in $requiredAzdExtensions) {
