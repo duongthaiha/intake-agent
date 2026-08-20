@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/intake-agent/human-review/v1.0.0",
+  "title": "Intake Agent human evaluation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "rubric_version",
+    "decision",
+    "sample_count",
+    "reviewer_count",
+    "variants"
+  ],
+  "properties": {
+    "rubric_version": {
+      "const": "1.0.0"
+    },
+    "decision": {
+      "const": "pass"
+    },
+    "sample_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reviewer_count": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "variants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hosted",
+        "prompt"
+      ],
+      "properties": {
+        "hosted": {
+          "$ref": "#/$defs/variant"
+        },
+        "prompt": {
+          "$ref": "#/$defs/variant"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "dimension_scores",
+        "critical_failures"
+      ],
+      "properties": {
+        "passed": {
+          "const": true
+        },
+        "critical_failures": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "dimension_scores": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "capture_fidelity",
+            "gap_contradiction_quality",
+            "clarification_quality",
+            "groundedness",
+            "workflow_correctness",
+            "security_privacy",
+            "helpfulness_accessibility"
+          ],
+          "properties": {
+            "capture_fidelity": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "gap_contradiction_quality": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "clarification_quality": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "groundedness": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "workflow_correctness": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "security_privacy": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            },
+            "helpfulness_accessibility": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 5
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,256 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Full 40-character commit SHA already merged to main
+        required: true
+        type: string
+      target_environment:
+        description: Stop after test evidence or promote the passing candidate
+        required: true
+        type: choice
+        options:
+          - test
+          - production
+      deployment_variant:
+        description: Network deployment variant
+        required: true
+        type: choice
+        options:
+          - baseline
+          - hardened
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-test-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate-candidate:
+    name: Deploy to test, evaluate, and verify evidence
+    runs-on: [self-hosted, intake-release]
+    environment: test
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Verify candidate is an immutable main commit
+        shell: bash
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::candidate_sha must be a lowercase 40-character SHA"
+            exit 1
+          }
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/main || {
+            echo "::error::candidate must already be reachable from main"
+            exit 1
+          }
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+
+      - name: Require integrated deployment contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f azure.yaml || {
+            echo "::error::azure.yaml is not integrated; release cannot deploy"
+            exit 1
+          }
+          test -f scripts/release/post-deploy-smoke.sh || {
+            echo "::error::runtime-owned post-deploy smoke script is not integrated"
+            exit 1
+          }
+
+      - name: Install Azure Developer CLI
+        uses: Azure/setup-azd@0b7e3a35ab00f2eee7080c845eb39c3f0ebfa553 # v2.4.0
+
+      - name: Azure login using workload identity federation
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate azd using federation
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: azd auth login --federated-credential-provider github
+
+      - name: Select azd environment
+        shell: bash
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          DEPLOYMENT_VARIANT: ${{ inputs.deployment_variant }}
+        run: |
+          set -euo pipefail
+          test "$AZURE_ENV_NAME" = "test" || {
+            echo "::error::test GitHub Environment must select the test azd environment"
+            exit 1
+          }
+          azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+          azd env set DEPLOYMENT_VARIANT "$DEPLOYMENT_VARIANT"
+
+      - name: Clean-environment deployment through azd
+        shell: bash
+        run: azd up --no-prompt
+
+      - name: Post-deploy smoke and cross-variant tests
+        shell: bash
+        run: bash scripts/release/post-deploy-smoke.sh
+
+      - name: Start private release evaluation
+        id: evaluation
+        shell: bash
+        env:
+          EVALUATION_API_AUDIENCE: ${{ vars.EVALUATION_API_AUDIENCE }}
+          EVALUATION_STATUS_URL: ${{ vars.EVALUATION_STATUS_URL }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          token="$(az account get-access-token --resource "$EVALUATION_API_AUDIENCE" --query accessToken -o tsv)"
+          response="$(
+            curl --fail --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer $token" \
+              --header "Content-Type: application/json" \
+              --data "{\"candidate_sha\":\"$CANDIDATE_SHA\",\"dataset_version\":\"1.0.0\",\"threshold_set_version\":\"1.0.0\"}" \
+              "$EVALUATION_STATUS_URL/runs"
+          )"
+          run_id="$(jq -er '.run_id' <<<"$response")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for complete passing scorecard
+        shell: bash
+        env:
+          EVALUATION_API_AUDIENCE: ${{ vars.EVALUATION_API_AUDIENCE }}
+          EVALUATION_STATUS_URL: ${{ vars.EVALUATION_STATUS_URL }}
+          RUN_ID: ${{ steps.evaluation.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          token="$(az account get-access-token --resource "$EVALUATION_API_AUDIENCE" --query accessToken -o tsv)"
+          EVALUATION_STATUS_TOKEN="$token" python scripts/evaluation/wait_for_scorecard.py \
+            --status-url "$EVALUATION_STATUS_URL/runs/$RUN_ID" \
+            --output release-evidence/scorecard.json \
+            --timeout-seconds 3600 \
+            --poll-seconds 15
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $token" \
+            --output release-evidence/human-review.json \
+            "$EVALUATION_STATUS_URL/runs/$RUN_ID/human-review"
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $token" \
+            --output release-evidence/manifest.json \
+            "$EVALUATION_STATUS_URL/runs/$RUN_ID/evidence-manifest"
+
+      - name: Verify signed evidence manifest and artifact digests
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          DEPLOYMENT_VARIANT: ${{ inputs.deployment_variant }}
+          RUN_ID: ${{ steps.evaluation.outputs.run_id }}
+        run: |
+          python scripts/evaluation/verify_evidence.py \
+            release-evidence/manifest.json \
+            --expected-commit-sha "$CANDIDATE_SHA" \
+            --expected-deployment-variant "$DEPLOYMENT_VARIANT" \
+            --expected-run-id "$RUN_ID" \
+            --expected-dataset-version "1.0.0" \
+            --expected-threshold-set-version "1.0.0"
+
+      - name: Retain immutable release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-${{ inputs.candidate_sha }}
+          path: release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+  promote-production:
+    name: Approve and promote to production
+    if: inputs.target_environment == 'production'
+    needs: evaluate-candidate
+    runs-on: [self-hosted, intake-release]
+    environment: production
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.candidate_sha }}
+
+      - name: Require integrated deployment contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f azure.yaml
+          test -f scripts/release/post-deploy-smoke.sh
+
+      - name: Install Azure Developer CLI
+        uses: Azure/setup-azd@0b7e3a35ab00f2eee7080c845eb39c3f0ebfa553 # v2.4.0
+
+      - name: Azure login using workload identity federation
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Authenticate azd using federation
+        shell: bash
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: azd auth login --federated-credential-provider github
+
+      - name: Select production azd environment
+        shell: bash
+        env:
+          AZURE_ENV_NAME: ${{ vars.AZURE_ENV_NAME }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          DEPLOYMENT_VARIANT: ${{ inputs.deployment_variant }}
+        run: |
+          set -euo pipefail
+          test "$AZURE_ENV_NAME" = "production" || {
+            echo "::error::production GitHub Environment must select the production azd environment"
+            exit 1
+          }
+          azd env new "$AZURE_ENV_NAME" --no-prompt || azd env select "$AZURE_ENV_NAME"
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
+          azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+          azd env set DEPLOYMENT_VARIANT "$DEPLOYMENT_VARIANT"
+
+      - name: Promote through the same azd contract
+        run: azd up --no-prompt
+
+      - name: Production smoke tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p production-evidence
+          bash scripts/release/post-deploy-smoke.sh 2>&1 | tee production-evidence/smoke.log
+
+      - name: Retain production smoke evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-smoke-${{ inputs.candidate_sha }}
+          path: production-evidence/
+          if-no-files-found: error
+          retention-days: 90
