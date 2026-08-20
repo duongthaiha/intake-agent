@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from evaluation.scorecard import main  # noqa: I001
+from evaluation.scorecard import main  # noqa: E402, I001
 
 
 if __name__ == "__main__":

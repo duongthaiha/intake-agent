@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from evaluation.scorecard import load_json, validate_passing_scorecard
+from evaluation.scorecard import load_json, validate_passing_scorecard  # noqa: E402
 
 JsonObject = dict[str, Any]
 Fetch = Callable[[], JsonObject]
@@ -58,7 +58,9 @@ def wait_for_scorecard(
         if status not in {"queued", "running"}:
             raise EvaluationStatusError(f"unknown or missing evaluation status: {status}")
         if monotonic() >= deadline:
-            raise EvaluationStatusError("evaluation timed out before complete evidence was available")
+            raise EvaluationStatusError(
+                "evaluation timed out before complete evidence was available"
+            )
         sleep(poll_seconds)
 
 

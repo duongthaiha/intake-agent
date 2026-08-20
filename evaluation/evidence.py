@@ -142,7 +142,9 @@ def validate_manifest(
             f"candidate.components missing required values: {missing_components}"
         )
     commit_sha = str(candidate["commit_sha"])
-    if len(commit_sha) != 40 or any(character not in "0123456789abcdef" for character in commit_sha):
+    if len(commit_sha) != 40 or any(
+        character not in "0123456789abcdef" for character in commit_sha
+    ):
         raise EvidenceError("candidate.commit_sha must be a lowercase 40-character SHA")
     if candidate["deployment_variant"] not in {"baseline", "hardened"}:
         raise EvidenceError("candidate.deployment_variant is invalid")
@@ -194,7 +196,9 @@ def validate_manifest(
         try:
             artifact_path.relative_to(base_dir.resolve())
         except ValueError as exc:
-            raise EvidenceError(f"artifact path escapes evidence directory: {artifact_path}") from exc
+            raise EvidenceError(
+                f"artifact path escapes evidence directory: {artifact_path}"
+            ) from exc
         if not artifact_path.is_file():
             raise EvidenceError(f"artifact is missing: {artifact_path}")
         actual_digest = sha256_file(artifact_path)
