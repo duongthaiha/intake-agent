@@ -63,5 +63,15 @@ uv run mypy
 uv run pytest
 ```
 
+On Microsoft-managed workstations where direct PyPI TLS is blocked, point `uv` at
+the configured package feed proxy. Repositories stored in OneDrive also need copy
+mode because cloud files do not support uv's cache hardlinks:
+
+```powershell
+$env:UV_DEFAULT_INDEX = "https://packagefeedproxy.microsoft.io/pypi/simple/"
+$env:UV_LINK_MODE = "copy"
+uv sync --python 3.12 --all-packages
+```
+
 Azure adapters, credentials, Foundry deployment, Teams publishing, and Azure
 infrastructure are deliberately outside this foundation layer.

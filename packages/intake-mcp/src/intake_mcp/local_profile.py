@@ -35,12 +35,12 @@ class HandoverRecord:
 class LocalProfile:
     """Fully in-memory profile with trusted, server-configured local principals."""
 
-    def __init__(self) -> None:
+    def __init__(self, template: TemplateVersion | None = None) -> None:
         self.store = InMemoryRequestStore()
         self.conversation_history = InMemoryConversationHistory()
         self.service = IntakeService(
             self.store,
-            {"software-request": default_template()},
+            {"software-request": template or default_template()},
             default_reviewer_id=LOCAL_REVIEWER_ID,
         )
         self.handovers: list[HandoverRecord] = []
@@ -190,6 +190,9 @@ class LocalProfile:
             rationale,
         )
         if not outcome.ok or decision != "approve" or outcome.data is None:
+            return _response(outcome)
+
+        if outcome.data["deliveryStatus"] != "pending":
             return _response(outcome)
 
         approved_revision = outcome.data["approvedRevision"]

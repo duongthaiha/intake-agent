@@ -1,6 +1,9 @@
+from dataclasses import replace
+
 from conftest import fill_required_fields
+from intake_application import IntakeService
 from intake_domain import ActorContext, ActorRole, AgentKind
-from intake_mcp import LocalProfile
+from intake_mcp import LOCAL_REVIEWER_ID, LocalProfile, default_template
 
 
 def test_capture_autosave_resume_and_cross_variant_state(profile: LocalProfile) -> None:
@@ -59,6 +62,29 @@ def test_capture_autosave_resume_and_cross_variant_state(profile: LocalProfile) 
 
     profile.reset()
     assert profile.conversation_history.list("conversation-resume") == ()
+
+
+def test_existing_request_keeps_its_template_version_after_active_version_changes(
+    profile: LocalProfile,
+) -> None:
+    original = profile.get_intake_context("template-version")
+    assert original.ok and original.data is not None
+    request_id = original.data["requestId"]
+
+    upgraded = replace(default_template(), version="1.1")
+    upgraded_service = IntakeService(
+        profile.store,
+        {"software-request": upgraded},
+        default_reviewer_id=LOCAL_REVIEWER_ID,
+    )
+    resumed = upgraded_service.get_intake_context(
+        profile.requester(), "template-version", "software-request"
+    )
+
+    assert resumed.ok and resumed.data is not None
+    assert resumed.data["requestId"] == request_id
+    assert resumed.data["template"]["templateVersion"] == "1.0"
+    assert resumed.replayed
 
 
 def test_low_confidence_limit_and_contradiction_block_submission(

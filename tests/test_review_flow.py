@@ -1,6 +1,8 @@
+from dataclasses import replace
+
 from conftest import fill_required_fields
 from intake_domain import ActorContext, ActorRole
-from intake_mcp import LocalProfile
+from intake_mcp import LocalProfile, default_template
 
 
 def test_feedback_resubmit_approval_completion_and_handover(
@@ -105,6 +107,30 @@ def test_rejection_preserves_exact_revision(profile: LocalProfile) -> None:
     assert request.review_decisions[0].revision_number == 1
 
 
+def test_approval_without_mandatory_handover_completes_without_delivery() -> None:
+    profile = LocalProfile(
+        template=replace(default_template(), mandatory_handover=False)
+    )
+    request_id, revision = fill_required_fields(profile, "no-handover")
+    submitted = profile.submit_intake_for_review(
+        request_id, revision, "submit-no-handover", confirmed=True
+    )
+    assert submitted.ok and submitted.data is not None
+
+    completed = profile.decide_intake_review(
+        request_id,
+        int(submitted.data["requestRevision"]),
+        "approve-no-handover",
+        "approve",
+        "The request is complete.",
+    )
+
+    assert completed.ok and completed.data is not None
+    assert completed.data["status"] == "completed"
+    assert completed.data["deliveryStatus"] == "not_required"
+    assert profile.handovers == []
+
+
 def test_authorization_assignment_and_separation_of_duties(
     profile: LocalProfile,
 ) -> None:
@@ -168,3 +194,49 @@ def test_authorization_assignment_and_separation_of_duties(
     assert separation.error is not None
     assert separation.error.code.value == "separation_of_duties"
 
+
+def test_completion_worker_cannot_cross_tenant_boundary(profile: LocalProfile) -> None:
+    request_id, revision = fill_required_fields(
+        profile, "worker-tenant", command_prefix="worker"
+    )
+    submitted = profile.submit_intake_for_review(
+        request_id, revision, "worker-submit", confirmed=True
+    )
+    assert submitted.ok and submitted.data is not None
+    approved = profile.service.decide_intake_review(
+        profile.reviewer(),
+        request_id,
+        int(submitted.data["requestRevision"]),
+        "worker-approve",
+        "approve",
+        "The request is ready for handover.",
+    )
+    assert approved.ok and approved.data is not None
+    request_revision = int(approved.data["requestRevision"])
+    worker = profile.worker()
+    other_tenant_worker = ActorContext(
+        tenant_id="other-tenant",
+        actor_id=worker.actor_id,
+        roles=worker.roles,
+        provenance=worker.provenance,
+        correlation_id="cross-tenant-worker",
+    )
+
+    delivery = profile.service.record_delivery_success(
+        other_tenant_worker,
+        request_id,
+        request_revision,
+        "cross-tenant-delivery",
+        "target",
+    )
+    completion = profile.service.complete_request_if_ready(
+        other_tenant_worker,
+        request_id,
+        request_revision,
+        "cross-tenant-completion",
+    )
+
+    for outcome in (delivery, completion):
+        assert not outcome.ok
+        assert outcome.error is not None
+        assert outcome.error.code.value == "authorization_denied"

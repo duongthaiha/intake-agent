@@ -464,6 +464,11 @@ class IntakeService:
                 )
 
             def operation(request: IntakeRequest) -> Mutation:
+                if actor.tenant_id != request.tenant_id:
+                    raise DomainError(
+                        ErrorCode.AUTHORIZATION_DENIED,
+                        "The completion worker cannot access a request in another tenant.",
+                    )
                 if request.status is not RequestStatus.APPROVED:
                     raise DomainError(
                         ErrorCode.INVALID_TRANSITION,
@@ -502,6 +507,11 @@ class IntakeService:
                 )
 
             def operation(request: IntakeRequest) -> Mutation:
+                if actor.tenant_id != request.tenant_id:
+                    raise DomainError(
+                        ErrorCode.AUTHORIZATION_DENIED,
+                        "The completion worker cannot access a request in another tenant.",
+                    )
                 if request.delivery_status not in {
                     DeliveryStatus.SUCCEEDED,
                     DeliveryStatus.NOT_REQUIRED,
@@ -568,7 +578,7 @@ class IntakeService:
             candidate,
             actor,
             f"create:{request_id}",
-            _fingerprint("create", request_id, template.version),
+            _fingerprint("create", request_id),
         )
         request = self._required(request_id)
         authorize_owner(actor, request)
