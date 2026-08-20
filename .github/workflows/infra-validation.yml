@@ -24,7 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-bicep@v2
+      - name: Install Bicep
+        run: az bicep install
       - uses: Azure/setup-azd@v2
       - name: Validate Bicep, parameters, JSON, and azure.yaml
         shell: pwsh
