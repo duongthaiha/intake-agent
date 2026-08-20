@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+name: intake-agent
+metadata:
+  template: intake-agent-infrastructure@0.1.0
+requiredVersions:
+  azd: ">=1.31.0"
+  extensions:
+    azure.ai.agents: ">=1.0.0-beta.9"
+    azure.ai.projects: ">=1.0.0-beta.1"
+infra:
+  provider: bicep
+  path: infra
+  module: main
+services:
+  command-service:
+    host: containerapp
+    image: ${COMMAND_SERVICE_IMAGE}
+    resourceName: ${AZURE_COMMAND_SERVICE_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+  outbox-worker:
+    host: containerapp
+    image: ${WORKERS_IMAGE}
+    resourceName: ${AZURE_OUTBOX_WORKER_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+  notification-worker:
+    host: containerapp
+    image: ${WORKERS_IMAGE}
+    resourceName: ${AZURE_NOTIFICATION_WORKER_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+  integration-worker:
+    host: containerapp
+    image: ${WORKERS_IMAGE}
+    resourceName: ${AZURE_INTEGRATION_WORKER_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+  completion-worker:
+    host: containerapp
+    image: ${WORKERS_IMAGE}
+    resourceName: ${AZURE_COMPLETION_WORKER_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+  retention-worker:
+    host: containerapp
+    image: ${WORKERS_IMAGE}
+    resourceName: ${AZURE_RETENTION_WORKER_NAME}
+    resourceGroup: ${AZURE_RESOURCE_GROUP}
+x-runtimeMappings:
+  evaluation-job:
+    provisioner: bicep
+    resourceType: Microsoft.App/jobs
+    resourceNameEnvironmentVariable: AZURE_EVALUATION_JOB_NAME
+    imageEnvironmentVariable: EVALUATION_IMAGE
+  hosted-agent:
+    provisioner: azure.ai.agents azd extension
+    artifact: src/agents/hosted
+    status: blocked-until-runtime-artifact-exists
+  prompt-agent:
+    provisioner: Microsoft Foundry configuration
+    artifact: config/foundry/prompt-agent
+    status: blocked-until-runtime-artifact-exists
+  requester-toolbox:
+    provisioner: Microsoft Foundry Toolbox
+    artifact: config/foundry/toolboxes/requester
+    status: blocked-until-oauth-and-runtime-artifacts-exist
+  reviewer-toolbox:
+    provisioner: Microsoft Foundry Toolbox
+    artifact: config/foundry/toolboxes/reviewer
+    status: blocked-until-oauth-and-runtime-artifacts-exist
+hooks:
+  preprovision:
+    windows:
+      shell: pwsh
+      run: scripts/azure/preflight.ps1
+      interactive: false
+    posix:
+      shell: pwsh
+      run: scripts/azure/preflight.ps1
+      interactive: false
+  postprovision:
+    windows:
+      shell: pwsh
+      run: scripts/azure/configure-container-apps-dns.ps1
+      interactive: false
+    posix:
+      shell: pwsh
+      run: scripts/azure/configure-container-apps-dns.ps1
+      interactive: false
+  predeploy:
+    windows:
+      shell: pwsh
+      run: scripts/azure/assert-runtime-artifacts.ps1
+      interactive: false
+    posix:
+      shell: pwsh
+      run: scripts/azure/assert-runtime-artifacts.ps1
+      interactive: false
+  postdeploy:
+    windows:
+      shell: pwsh
+      run: scripts/azure/configure-foundry.ps1
+      interactive: false
+    posix:
+      shell: pwsh
+      run: scripts/azure/configure-foundry.ps1
+      interactive: false

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "version",
+    "projectEnvironmentVariable",
+    "deployables"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "projectEnvironmentVariable": {
+      "type": "string"
+    },
+    "deployables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "artifactPath",
+          "provisioner",
+          "required"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "hosted-agent",
+              "prompt-agent",
+              "toolbox"
+            ]
+          },
+          "artifactPath": {
+            "type": "string"
+          },
+          "provisioner": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,31 @@
+name: Infrastructure validation
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/infra-validation.yml"
+      - "azure.yaml"
+      - "infra/**"
+      - "scripts/azure/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/infra-validation.yml"
+      - "azure.yaml"
+      - "infra/**"
+      - "scripts/azure/**"
+
+permissions:
+  contents: read
+
+jobs:
+  static-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-bicep@v2
+      - uses: Azure/setup-azd@v2
+      - name: Validate Bicep, parameters, JSON, and azure.yaml
+        shell: pwsh
+        run: ./scripts/azure/validate-infrastructure.ps1
