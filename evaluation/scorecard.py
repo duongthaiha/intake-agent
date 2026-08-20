@@ -407,11 +407,11 @@ def _check_thresholds(
         threshold = rule.get("value")
         passed = False
         numeric_value: float | None = None
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, int | float) and not isinstance(value, bool):
             candidate_value = float(value)
             if math.isfinite(candidate_value) and 0.0 <= candidate_value <= 1.0:
                 numeric_value = candidate_value
-        if numeric_value is not None and isinstance(threshold, (int, float)):
+        if numeric_value is not None and isinstance(threshold, int | float):
             if direction == "minimum":
                 passed = numeric_value >= threshold
             elif direction == "maximum":
@@ -447,7 +447,7 @@ def _validate_threshold_set(
             reasons.append(f"{label}:{name}:threshold_direction_invalid")
         threshold = raw_rule.get("value")
         if (
-            not isinstance(threshold, (int, float))
+            not isinstance(threshold, int | float)
             or isinstance(threshold, bool)
             or not math.isfinite(float(threshold))
             or not 0.0 <= threshold <= 1.0

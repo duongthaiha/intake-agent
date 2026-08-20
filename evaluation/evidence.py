@@ -85,7 +85,7 @@ def validate_human_review(value: Mapping[str, Any]) -> None:
             )
         for dimension, score in dimensions.items():
             if (
-                not isinstance(score, (int, float))
+                not isinstance(score, int | float)
                 or isinstance(score, bool)
                 or not 1.0 <= score <= 5.0
                 or score < 4.0
