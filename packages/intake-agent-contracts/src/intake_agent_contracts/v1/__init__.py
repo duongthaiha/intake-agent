@@ -2,7 +2,10 @@
 
 from intake_agent_contracts.v1.models import (
     AddReviewCommentRequest,
+    ApprovedField,
+    ApprovedRequestHandover,
     DecideReviewRequest,
+    DownstreamAcceptance,
     ErrorCode,
     ErrorDetail,
     GetIntakeContextRequest,
@@ -17,7 +20,10 @@ from intake_agent_contracts.v1.models import (
 
 __all__ = [
     "AddReviewCommentRequest",
+    "ApprovedField",
+    "ApprovedRequestHandover",
     "DecideReviewRequest",
+    "DownstreamAcceptance",
     "ErrorCode",
     "ErrorDetail",
     "GetIntakeContextRequest",
@@ -29,4 +35,3 @@ __all__ = [
     "ToolResponse",
     "UpdateFieldRequest",
 ]
-

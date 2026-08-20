@@ -492,6 +492,203 @@ class IntakeService:
 
         return self._capture(execute)
 
+    def record_delivery_result(
+        self,
+        actor: ActorContext,
+        request_id: str,
+        expected_revision: int,
+        command_id: str,
+        target: str,
+        status: str,
+        reason: str | None = None,
+    ) -> Outcome:
+        """Record an integration result through a service-only command."""
+
+        def execute() -> Outcome:
+            if ActorRole.INTEGRATION_WORKER not in actor.roles:
+                raise DomainError(
+                    ErrorCode.AUTHORIZATION_DENIED,
+                    "Integration worker role is required.",
+                )
+            if status not in {"succeeded", "retryable_failure", "permanent_failure"}:
+                raise DomainError(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Delivery status is not supported.",
+                )
+            normalized_reason = reason.strip()[:500] if reason else None
+
+            def operation(request: IntakeRequest) -> Mutation:
+                if actor.tenant_id != request.tenant_id:
+                    raise DomainError(
+                        ErrorCode.AUTHORIZATION_DENIED,
+                        "The integration worker cannot access a request in another tenant.",
+                    )
+                if request.status is not RequestStatus.APPROVED:
+                    raise DomainError(
+                        ErrorCode.INVALID_TRANSITION,
+                        "Only an approved request can record a delivery result.",
+                    )
+                if status == "succeeded":
+                    request.delivery_status = DeliveryStatus.SUCCEEDED
+                    request.delivery_failure_reason = None
+                    event = PendingEvent("DeliveryCompleted", {"target": target})
+                else:
+                    request.delivery_status = (
+                        DeliveryStatus.PENDING
+                        if status == "retryable_failure"
+                        else DeliveryStatus.FAILED
+                    )
+                    request.delivery_failure_reason = normalized_reason
+                    event = PendingEvent(
+                        "DeliveryFailed",
+                        {
+                            "target": target,
+                            "retryable": status == "retryable_failure",
+                            "reason": normalized_reason,
+                        },
+                    )
+                return Mutation(
+                    data={
+                        "deliveryStatus": request.delivery_status.value,
+                        "target": target,
+                    },
+                    events=(event,),
+                )
+
+            receipt = self._store.mutate(
+                request_id,
+                expected_revision,
+                actor,
+                command_id,
+                _fingerprint(
+                    "delivery-result",
+                    request_id,
+                    expected_revision,
+                    target,
+                    status,
+                    normalized_reason,
+                ),
+                operation,
+            )
+            return Outcome(True, receipt.data, replayed=receipt.replayed)
+
+        return self._capture(execute)
+
+    def record_notification_result(
+        self,
+        actor: ActorContext,
+        request_id: str,
+        expected_revision: int,
+        command_id: str,
+        notification_id: str,
+        status: str,
+    ) -> Outcome:
+        """Record notification delivery without exposing the command to MCP."""
+
+        def execute() -> Outcome:
+            if ActorRole.NOTIFICATION_WORKER not in actor.roles:
+                raise DomainError(
+                    ErrorCode.AUTHORIZATION_DENIED,
+                    "Notification worker role is required.",
+                )
+            if status not in {"succeeded", "exhausted"}:
+                raise DomainError(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Notification status is not supported.",
+                )
+
+            def operation(request: IntakeRequest) -> Mutation:
+                if actor.tenant_id != request.tenant_id:
+                    raise DomainError(
+                        ErrorCode.AUTHORIZATION_DENIED,
+                        "The notification worker cannot access a request in another tenant.",
+                    )
+                request.notification_results[notification_id] = status
+                return Mutation(
+                    data={
+                        "notificationId": notification_id,
+                        "notificationStatus": status,
+                    },
+                    events=(
+                        PendingEvent(
+                            "NotificationResultRecorded",
+                            {
+                                "notificationId": notification_id,
+                                "status": status,
+                            },
+                        ),
+                    ),
+                )
+
+            receipt = self._store.mutate(
+                request_id,
+                expected_revision,
+                actor,
+                command_id,
+                _fingerprint(
+                    "notification-result",
+                    request_id,
+                    expected_revision,
+                    notification_id,
+                    status,
+                ),
+                operation,
+            )
+            return Outcome(True, receipt.data, replayed=receipt.replayed)
+
+        return self._capture(execute)
+
+    def record_retention_result(
+        self,
+        actor: ActorContext,
+        request_id: str,
+        expected_revision: int,
+        command_id: str,
+        status: str,
+    ) -> Outcome:
+        """Record an applied retention action or legal-hold outcome."""
+
+        def execute() -> Outcome:
+            if ActorRole.RETENTION_WORKER not in actor.roles:
+                raise DomainError(
+                    ErrorCode.AUTHORIZATION_DENIED,
+                    "Retention worker role is required.",
+                )
+            if status not in {"deleted", "held", "failed"}:
+                raise DomainError(
+                    ErrorCode.VALIDATION_FAILED,
+                    "Retention status is not supported.",
+                )
+
+            def operation(request: IntakeRequest) -> Mutation:
+                if actor.tenant_id != request.tenant_id:
+                    raise DomainError(
+                        ErrorCode.AUTHORIZATION_DENIED,
+                        "The retention worker cannot access a request in another tenant.",
+                    )
+                request.retention_status = status
+                return Mutation(
+                    data={"retentionStatus": status},
+                    events=(PendingEvent("RetentionResultRecorded", {"status": status}),),
+                )
+
+            receipt = self._store.mutate(
+                request_id,
+                expected_revision,
+                actor,
+                command_id,
+                _fingerprint(
+                    "retention-result",
+                    request_id,
+                    expected_revision,
+                    status,
+                ),
+                operation,
+            )
+            return Outcome(True, receipt.data, replayed=receipt.replayed)
+
+        return self._capture(execute)
+
     def complete_request_if_ready(
         self,
         actor: ActorContext,

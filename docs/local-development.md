@@ -19,7 +19,8 @@ reviewer. This keeps identity outside model control while providing a
 credential-free development profile.
 
 Restart the process or call `LocalProfile.reset()` in tests to clear all local
-state deterministically. Features requiring Azure or Teams—including delegated
-OAuth, managed identity, Cosmos DB durability, Service Bus delivery, native
-Teams publishing, notifications, and private connectivity—are not simulated
-and require a deployed profile in a later delivery layer.
+state deterministically. The Azure runtime provides delegated JWT validation,
+managed-identity composition, Cosmos DB durability, Service Bus delivery, Blob
+evidence, and background worker hosts, but none of those services are simulated
+or required by `intake-local`. Native Teams publishing and private connectivity
+remain deployment concerns.

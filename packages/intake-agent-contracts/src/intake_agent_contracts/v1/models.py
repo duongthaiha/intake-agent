@@ -99,3 +99,47 @@ class DecideReviewRequest(ContractModel):
     decision: Literal["approve", "reject"]
     rationale: str = Field(min_length=1, max_length=2000)
 
+
+class ApprovedField(ContractModel):
+    field_path: str = Field(alias="fieldPath", min_length=1, max_length=200)
+    value: str = Field(max_length=4000)
+    source_reference: str = Field(
+        alias="sourceReference", min_length=1, max_length=500
+    )
+
+
+class ApprovedRequestHandover(ContractModel):
+    """Version 1 immutable approved-request downstream payload."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+        frozen=True,
+    )
+
+    contract_version: Literal["1.0"] = Field(
+        default="1.0", alias="contractVersion"
+    )
+    request_id: str = Field(alias="requestId", min_length=1, max_length=100)
+    tenant_id: str = Field(alias="tenantId", min_length=1, max_length=100)
+    approved_revision: int = Field(alias="approvedRevision", ge=1)
+    template_id: str = Field(alias="templateId", min_length=1, max_length=100)
+    template_version: str = Field(
+        alias="templateVersion", min_length=1, max_length=50
+    )
+    schema_version: str = Field(
+        alias="schemaVersion", min_length=1, max_length=50
+    )
+    approved_at: str = Field(alias="approvedAt", min_length=1, max_length=50)
+    fields: tuple[ApprovedField, ...]
+
+
+class DownstreamAcceptance(ContractModel):
+    contract_version: Literal["1.0"] = Field(
+        default="1.0", alias="contractVersion"
+    )
+    accepted: bool
+    duplicate: bool = False
+    downstream_id: str = Field(
+        alias="downstreamId", min_length=1, max_length=200
+    )

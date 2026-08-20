@@ -1,19 +1,15 @@
 [project]
-name = "intake-mcp"
+name = "intake-workers"
 version = "0.1.0"
-description = "Local FastMCP surface and composition root for Intake Agent"
+description = "Service-only workers and Azure Functions hosts for Intake Agent"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+    "azure-functions>=1.25.0,<2",
     "intake-agent-contracts",
     "intake-application",
     "intake-domain",
     "intake-persistence",
-    "mcp>=2.0.0,<3",
-    "pyjwt[crypto]",
 ]
-
-[project.scripts]
-intake-local = "intake_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]

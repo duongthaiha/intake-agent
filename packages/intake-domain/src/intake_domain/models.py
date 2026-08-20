@@ -11,6 +11,9 @@ class ActorRole(StrEnum):
     REVIEWER = "reviewer"
     ADMINISTRATOR = "administrator"
     COMPLETION_WORKER = "completion_worker"
+    INTEGRATION_WORKER = "integration_worker"
+    NOTIFICATION_WORKER = "notification_worker"
+    RETENTION_WORKER = "retention_worker"
 
 
 class AgentKind(StrEnum):
@@ -184,6 +187,9 @@ class IntakeRequest:
     review_decisions: list[ReviewDecision] = field(default_factory=list)
     approved_revision_number: int | None = None
     delivery_status: DeliveryStatus = DeliveryStatus.NOT_REQUIRED
+    delivery_failure_reason: str | None = None
+    notification_results: dict[str, str] = field(default_factory=dict)
+    retention_status: str = "active"
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

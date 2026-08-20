@@ -54,6 +54,12 @@ def test_internal_import_boundaries() -> None:
         "intake_domain": set(),
         "intake_application": {"intake_domain"},
         "intake_persistence": {"intake_domain"},
+        "intake_workers": {
+            "intake_agent_contracts",
+            "intake_application",
+            "intake_domain",
+            "intake_persistence",
+        },
         "intake_mcp": {
             "intake_agent_contracts",
             "intake_application",
@@ -81,6 +87,14 @@ def test_internal_import_boundaries() -> None:
     assert violations == []
 
 
+def test_default_azure_credential_is_limited_to_composition_roots() -> None:
+    matches: list[str] = []
+    for source in (ROOT / "packages").rglob("*.py"):
+        if "DefaultAzureCredential" in source.read_text(encoding="utf-8"):
+            matches.append(source.relative_to(ROOT).as_posix())
+    assert matches == ["packages/intake-persistence/src/intake_persistence/composition.py"]
+
+
 def _check_import(
     package: str,
     source: Path,
@@ -90,4 +104,3 @@ def _check_import(
 ) -> None:
     if imported in allowed and imported != package and imported not in allowed[package]:
         violations.append(f"{source.relative_to(ROOT)} imports forbidden {imported}")
-

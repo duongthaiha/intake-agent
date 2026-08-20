@@ -2,7 +2,7 @@
 name = "intake-agent-foundation"
 version = "0.1.0"
 description = "Deterministic foundation and local profile for the Intake Agent MVP"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "intake-agent-behavior",
     "intake-agent-contracts",
@@ -10,6 +10,7 @@ dependencies = [
     "intake-domain",
     "intake-mcp",
     "intake-persistence",
+    "intake-workers",
 ]
 
 [dependency-groups]
@@ -30,6 +31,7 @@ intake-application = { workspace = true }
 intake-domain = { workspace = true }
 intake-mcp = { workspace = true }
 intake-persistence = { workspace = true }
+intake-workers = { workspace = true }
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -51,6 +53,7 @@ packages = [
     "intake_domain",
     "intake_mcp",
     "intake_persistence",
+    "intake_workers",
 ]
 
 [tool.pytest.ini_options]
